@@ -1,0 +1,86 @@
+[project]
+name = "paperless-export"
+version = "0.1.0"
+description = "Scheduled wrapper around Paperless-ngx's document_exporter plus a _Steuer/YYYY tax-view post-processor."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "gykonik" }]
+requires-python = ">=3.12"
+keywords = ["paperless-ngx", "export", "backup", "documents"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Environment :: Console",
+  "Intended Audience :: End Users/Desktop",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: System :: Archiving :: Backup",
+]
+dependencies = [
+  "httpx>=0.28",
+  "pydantic>=2.9",
+  "typer>=0.15",
+]
+
+[project.optional-dependencies]
+pdf = ["pikepdf>=9.0"]
+
+[project.urls]
+Repository = "https://github.com/fileworks/paperless-export"
+Issues = "https://github.com/fileworks/paperless-export/issues"
+
+[project.scripts]
+paperless-export = "paperless_export.cli:app"
+
+[dependency-groups]
+dev = [
+  "mypy>=1.13",
+  "pikepdf>=9.0",
+  "pytest>=8.3",
+  "respx>=0.22",
+  "ruff>=0.8",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/paperless_export"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "UP", "B", "A", "C4", "SIM", "RUF", "PTH", "RET", "ARG"]
+
+[tool.ruff.lint.per-file-ignores]
+# pytest fixtures are frequently used only for their side effect
+"tests/**" = ["ARG001"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+files = ["src", "tests"]
+
+[[tool.mypy.overrides]]
+module = "pikepdf.*"
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.semantic_release]
+version_toml = ["pyproject.toml:project.version"]
+version_variables = ["src/paperless_export/__init__.py:__version__"]
+commit_message = "chore(release): {version} [skip ci]"
+build_command = "python -m pip install uv && uv build"
+allow_zero_version = true
+
+[tool.semantic_release.branches.main]
+match = "main"
+
+[tool.semantic_release.changelog.default_templates]
+changelog_file = "CHANGELOG.md"
