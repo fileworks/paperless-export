@@ -62,3 +62,13 @@ class TestTaxYears:
         pattern = tag_pattern("Tax-")
         assert pattern.fullmatch("Tax-2024")
         assert not pattern.fullmatch("Steuer-2024")
+
+
+class TestMissingManifestMessage:
+    def test_names_the_host_vs_container_path_confusion(self, tmp_path: Path) -> None:
+        with pytest.raises(OutputError) as excinfo:
+            load_documents(tmp_path / "manifest.json")
+
+        message = str(excinfo.value)
+        assert "--exporter-target" in message
+        assert "--export-dir" in message
