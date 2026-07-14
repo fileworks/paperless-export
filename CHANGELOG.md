@@ -1,6 +1,24 @@
 # CHANGELOG
 
 
+## v0.1.0 (2026-07-14)
+
+### Features
+
+- **exporter**: Stream document_exporter's output instead of buffering it
+  ([#5](https://github.com/fileworks/paperless-export/pull/5),
+  [`a788025`](https://github.com/fileworks/paperless-export/commit/a7880256cc9cfee21024a91de614d8a62e054793))
+
+Exporting thousands of documents takes minutes, and the output was captured and withheld until the
+  process exited — so a long, healthy export was indistinguish-able from a hung one. Its lines are
+  now relayed as they arrive.
+
+stderr is folded into stdout while doing it, because Paperless reports a failure on either depending
+  on the version: the path-too-long fallback was only ever scanning stderr, and would have missed a
+  failure announced on stdout. The error message now repeats the useful tail of the log rather than
+  the whole thing.
+
+
 ## v0.0.3 (2026-07-13)
 
 ### Bug Fixes
