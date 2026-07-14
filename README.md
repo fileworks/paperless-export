@@ -68,8 +68,11 @@ Notes:
 - **Idempotent** — the `_Steuer/` view is rebuilt from scratch each run; safe nightly.
 - **Verifiable** — after a run, `_Steuer/2025/` contains exactly the documents
   tagged `Steuer-2025`; `INDEX.csv` matches a manifest query.
-- **Honest failures** — a non-zero `document_exporter` exit surfaces its stderr
+- **Honest failures** — a non-zero `document_exporter` exit surfaces its output
   and exit code; symlink-unsupported filesystems auto-switch to copies with a notice.
+- **Never silent** — `document_exporter`'s output is relayed live rather than
+  buffered until the end, so a long export is visibly working instead of looking
+  hung. The same output is what's scanned for the path-too-long fallback.
 
 ## Exit codes
 

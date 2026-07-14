@@ -85,3 +85,41 @@ class TestRunExporter:
     def test_missing_binary_is_actionable(self) -> None:
         with pytest.raises(ServerUnreachableError, match="--exporter-cmd"):
             run_exporter("/does/not/exist-binary", "/export")
+
+
+class TestLiveOutput:
+    """A multi-minute export must look alive, not hung."""
+
+    def test_output_is_relayed_while_the_exporter_runs(
+        self, tmp_path: Path, capfd: pytest.CaptureFixture[str]
+    ) -> None:
+        script = tmp_path / "chatty.py"
+        script.write_text(
+            "import sys\n"
+            "print('Exporting document 1 of 2')\n"
+            "print('Exporting document 2 of 2')\n"
+            "sys.stderr.write('done\\n')\n"
+        )
+        result = run_exporter(_cmd(script), "/export")
+
+        relayed = capfd.readouterr().err
+        assert "Exporting document 1 of 2" in relayed
+        assert "Exporting document 2 of 2" in relayed
+        # and it is still captured for the caller
+        assert "done" in result.output
+
+    def test_path_too_long_on_stdout_still_triggers_the_fallback(self, tmp_path: Path) -> None:
+        """Paperless reports this on stdout or stderr depending on version."""
+        script = tmp_path / "toolong_stdout.py"
+        script.write_text(
+            "import json, sys, pathlib\n"
+            "if '--use-filename-format' in sys.argv:\n"
+            "    print(\"OSError: [Errno 36] File name too long: '/export/x'\")\n"
+            "    sys.exit(1)\n"
+            "pathlib.Path(__file__).with_suffix('.argv.json').write_text(json.dumps(sys.argv[1:]))\n"
+        )
+        result = run_exporter(_cmd(script), "/export")
+
+        assert not result.used_filename_format
+        argv = json.loads(script.with_suffix(".argv.json").read_text())
+        assert "--use-filename-format" not in argv

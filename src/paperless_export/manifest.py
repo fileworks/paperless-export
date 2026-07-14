@@ -54,8 +54,11 @@ def _names_by_pk(entries: list[dict[str, Any]], model: str) -> dict[int, str]:
 def load_documents(manifest_path: Path) -> list[ExportedDocument]:
     if not manifest_path.is_file():
         raise OutputError(
-            f"No manifest at {manifest_path} — run the exporter first "
-            "(or point --export-dir at an existing export)."
+            f"No manifest.json at {manifest_path}.\n"
+            "If document_exporter just reported success, the two paths disagree:\n"
+            "  --exporter-target is where the container writes (e.g. ../export)\n"
+            "  --export-dir     is that same directory as THIS machine sees it\n"
+            "Both must resolve to one folder. Otherwise, run the exporter first."
         )
     try:
         entries: list[dict[str, Any]] = json.loads(manifest_path.read_text(encoding="utf-8"))
