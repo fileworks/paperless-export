@@ -9,16 +9,32 @@ preserves all metadata, so only enable this if you want tags *inside* the files.
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass, field
 from pathlib import Path
 
-from .errors import ConfigError
+from .errors import ConfigError, UnsafeOutputError
 from .manifest import ExportedDocument
+from .paths import ConfinedPath
 
 logger = logging.getLogger(__name__)
 
 
-def embed_metadata(export_dir: Path, documents: list[ExportedDocument]) -> int:
-    """Write tags/correspondent/type into each exported PDF; returns count embedded."""
+@dataclass
+class EmbedResult:
+    embedded: int = 0
+    skipped: int = 0
+    failed: list[str] = field(default_factory=list)
+
+
+def _pdf_targets(doc: ExportedDocument) -> list[ConfinedPath]:
+    targets = [doc.original]
+    if doc.archive is not None:
+        targets.append(doc.archive)
+    return [target for target in targets if target.relative.suffix.lower() == ".pdf"]
+
+
+def embed_metadata(_export_dir: Path, documents: list[ExportedDocument]) -> EmbedResult:
+    """Write metadata into each distinct confined original/archive PDF."""
     try:
         import pikepdf
     except ImportError as exc:
@@ -26,25 +42,47 @@ def embed_metadata(export_dir: Path, documents: list[ExportedDocument]) -> int:
             "--embed-tags needs pikepdf — install with: pipx install 'paperless-export[pdf]'"
         ) from exc
 
-    embedded = 0
+    result = EmbedResult()
+    seen: set[tuple[int, int] | Path] = set()
     for doc in documents:
-        pdf_path = export_dir / doc.file_path
-        if pdf_path.suffix.lower() != ".pdf" or not pdf_path.is_file():
-            continue
-        try:
-            with pikepdf.open(pdf_path, allow_overwriting_input=True) as pdf:
-                with pdf.open_metadata() as meta:
-                    if doc.tags:
-                        meta["dc:subject"] = doc.tags
-                        meta["pdf:Keywords"] = ", ".join(doc.tags)
-                    if doc.title:
-                        meta["dc:title"] = doc.title
-                    if doc.correspondent:
-                        meta["dc:creator"] = [doc.correspondent]
-                    if doc.document_type:
-                        meta["dc:type"] = [doc.document_type]
-                pdf.save(pdf_path)
-            embedded += 1
-        except Exception as exc:  # one broken PDF must not kill the run
-            logger.warning("Could not embed metadata into %s: %s", doc.file_path, exc)
-    return embedded
+        targets = _pdf_targets(doc)
+        result.skipped += int(not targets)
+        for target in targets:
+            identities = target.identities()
+            if identities & seen:
+                result.skipped += 1
+                continue
+            seen.update(identities)
+            pdf_path = target.regular_file()
+            if pdf_path is None:
+                result.failed.append(target.display)
+                continue
+            try:
+                # Repeat confinement and file-type checks at the destructive open.
+                pdf_path = target.regular_file()
+                if pdf_path is None:
+                    result.failed.append(target.display)
+                    continue
+                with pikepdf.open(pdf_path, allow_overwriting_input=True) as pdf:
+                    with pdf.open_metadata() as meta:
+                        if doc.tags:
+                            meta["dc:subject"] = doc.tags
+                            meta["pdf:Keywords"] = ", ".join(doc.tags)
+                        if doc.title:
+                            meta["dc:title"] = doc.title
+                        if doc.correspondent:
+                            meta["dc:creator"] = [doc.correspondent]
+                        if doc.document_type:
+                            meta["dc:type"] = [doc.document_type]
+                    pdf.save(pdf_path)
+                result.embedded += 1
+            except UnsafeOutputError:
+                raise
+            except Exception as exc:  # one broken PDF must not stop other safe work
+                logger.warning(
+                    "Could not embed metadata into %s: %s",
+                    target.display,
+                    type(exc).__name__,
+                )
+                result.failed.append(target.display)
+    return result

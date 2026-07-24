@@ -7,11 +7,26 @@ from pathlib import Path
 import pytest
 
 from paperless_export.errors import ExporterFailedError, ServerUnreachableError
-from paperless_export.exporter import build_command, run_exporter
+from paperless_export.exporter import (
+    DIAGNOSTIC_TAIL_BYTES,
+    _Completed,
+    build_command,
+    run_exporter,
+)
 
 
 def _cmd(script: Path) -> str:
     return f"{sys.executable} {script}"
+
+
+def _completed_run(
+    completed: _Completed,
+) -> object:
+    def run(_command: list[str], *, stdin_value: str | None = None) -> _Completed:
+        del stdin_value
+        return completed
+
+    return run
 
 
 class TestBuildCommand:
@@ -59,7 +74,8 @@ class TestRunExporter:
         script.write_text("import sys; sys.stderr.write('database is locked'); sys.exit(5)\n")
         with pytest.raises(ExporterFailedError, match="database is locked") as excinfo:
             run_exporter(_cmd(script), "/export")
-        assert excinfo.value.exit_code == 5
+        assert excinfo.value.exit_code == 6
+        assert excinfo.value.child_code == 5
 
     def test_path_too_long_falls_back_to_flat(self, tmp_path: Path) -> None:
         script = tmp_path / "toolong.py"
@@ -74,7 +90,39 @@ class TestRunExporter:
         assert not result.used_filename_format
         argv = json.loads(script.with_suffix(".argv.json").read_text())
         assert "--use-filename-format" not in argv
-        assert "--compare-checksums" in argv
+
+    def test_retains_only_a_bounded_tail_of_large_output(self, tmp_path: Path) -> None:
+        script = tmp_path / "large.py"
+        script.write_text(f"print('x' * {DIAGNOSTIC_TAIL_BYTES * 2})\n")
+        result = run_exporter(_cmd(script), "/export")
+        assert len(result.output.encode()) <= DIAGNOSTIC_TAIL_BYTES
+
+    def test_early_path_marker_survives_tail_eviction(self, tmp_path: Path) -> None:
+        script = tmp_path / "early_marker.py"
+        script.write_text(
+            "import json, pathlib, sys\n"
+            "if '--use-filename-format' in sys.argv:\n"
+            "    print('File name too long')\n"
+            f"    print('x' * {DIAGNOSTIC_TAIL_BYTES * 2})\n"
+            "    raise SystemExit(1)\n"
+            "pathlib.Path(__file__).with_suffix('.argv.json').write_text(json.dumps(sys.argv[1:]))\n"
+        )
+        result = run_exporter(_cmd(script), "/export")
+        assert not result.used_filename_format
+
+    def test_chunk_split_path_marker_triggers_fallback(self, tmp_path: Path) -> None:
+        script = tmp_path / "split_marker.py"
+        script.write_text(
+            "import json, pathlib, sys\n"
+            "if '--use-filename-format' in sys.argv:\n"
+            "    sys.stdout.buffer.write(b'x' * 8188 + b'file')\n"
+            "    sys.stdout.buffer.flush()\n"
+            "    sys.stdout.buffer.write(b' name too long')\n"
+            "    raise SystemExit(1)\n"
+            "pathlib.Path(__file__).with_suffix('.argv.json').write_text(json.dumps(sys.argv[1:]))\n"
+        )
+        result = run_exporter(_cmd(script), "/export")
+        assert not result.used_filename_format
 
     def test_no_fallback_raises_original_failure(self, tmp_path: Path) -> None:
         script = tmp_path / "toolong.py"
@@ -123,3 +171,36 @@ class TestLiveOutput:
         assert not result.used_filename_format
         argv = json.loads(script.with_suffix(".argv.json").read_text())
         assert "--use-filename-format" not in argv
+
+
+class TestDockerClassification:
+    def test_daemon_project_service_and_container_failures_are_unavailable(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        for output in (
+            "Cannot connect to the Docker daemon",
+            "no configuration file provided",
+            "no such service: webserver",
+            "container is not running",
+        ):
+            completed = _Completed(1, output, False, True)
+            monkeypatch.setattr(
+                "paperless_export.exporter._run",
+                _completed_run(completed),
+            )
+            with pytest.raises(ServerUnreachableError) as excinfo:
+                run_exporter()
+            assert excinfo.value.exit_code == 3
+
+    def test_paperless_failure_in_reachable_container_is_exporter_failure(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        completed = _Completed(2, "CommandError: database is locked", False, False)
+        monkeypatch.setattr(
+            "paperless_export.exporter._run",
+            _completed_run(completed),
+        )
+        with pytest.raises(ExporterFailedError) as excinfo:
+            run_exporter()
+        assert excinfo.value.exit_code == 6
+        assert excinfo.value.child_code == 2

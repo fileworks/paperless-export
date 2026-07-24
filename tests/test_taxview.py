@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from paperless_export.manifest import load_documents
+from paperless_export.paths import ExportRoot
 from paperless_export.taxview import build_tax_view
 
 
@@ -74,8 +75,16 @@ class TestBuildTaxView:
     def test_filename_collision_gets_pk_suffix(self, export_dir: Path) -> None:
         docs = load_documents(export_dir / "manifest.json")
         # second doc exporting to the same basename in the same year
+        root = ExportRoot.from_path(export_dir)
         clone = docs[0].model_copy(
-            update={"pk": 99, "file_path": "Andere/2024-05-01 Steuerbescheid 2024.pdf"}
+            update={
+                "pk": 99,
+                "original": root.confine(
+                    "Andere/2024-05-01 Steuerbescheid 2024.pdf",
+                    document_id=99,
+                    field="original",
+                ),
+            }
         )
         source = export_dir / clone.file_path
         source.parent.mkdir(parents=True)
