@@ -34,7 +34,11 @@ pipx install paperless-export          # + 'paperless-export[pdf]' for --embed-t
 brew install fileworks/tap/paperless-export
 ```
 
-*(Not yet published — first release pending; until then: `uv run paperless-export` from a checkout.)*
+Version `0.1.0` is published on
+[PyPI](https://pypi.org/project/paperless-export/0.1.0/), as a
+[GitHub Release](https://github.com/fileworks/paperless-export/releases/tag/v0.1.0),
+and through `fileworks/tap`. Development after that tag remains unreleased
+until the normal release workflow runs.
 
 ## Usage
 
@@ -107,6 +111,10 @@ uv build
 Conventional Commits drive releases (`python-semantic-release`): merge to
 `main` → version bump + changelog + GitHub Release + PyPI publish (OIDC) +
 Homebrew formula bump.
+
+For per-clone paths, commands, or preferences, create an ignored
+`CLAUDE.local.md` at the repository root. Do not put credentials or other
+secrets in it.
 
 ## License
 
