@@ -13,7 +13,7 @@ from typing import Annotated
 import typer
 
 from . import __version__
-from .errors import EXIT_UNEXPECTED, PaperlessExportError
+from .errors import EXIT_UNEXPECTED, PaperlessExportError, PartialOutputError
 
 app = typer.Typer(add_completion=False, context_settings={"help_option_names": ["-h", "--help"]})
 
@@ -62,28 +62,57 @@ def _guarded[T](verbose: bool, action: Callable[[], T]) -> T:
         raise typer.Exit(code=EXIT_UNEXPECTED) from exc
 
 
-def _build_views(
+def _post_process(
     export_dir: Path,
     *,
     copy: bool,
     tax_tag_prefix: str,
     embed_tags: bool,
+    tax_view: bool,
 ) -> None:
     from .embed import embed_metadata
     from .manifest import load_documents
-    from .taxview import build_tax_view
+    from .taxview import build_tax_view, validate_tax_view_root
 
     documents = load_documents(export_dir / "manifest.json")
-    result = build_tax_view(export_dir, documents, copy=copy, prefix=tax_tag_prefix)
-    typer.echo(
-        f"_Steuer view: {result.total} documents across years "
-        f"{', '.join(sorted(result.years)) or '—'} (see _Steuer/INDEX.csv)"
-    )
-    for missing in result.missing:
-        typer.secho(f"  missing on disk, not linked: {missing}", fg=typer.colors.YELLOW, err=True)
+    if tax_view:
+        validate_tax_view_root(export_dir)
+
+    failures: list[str] = []
     if embed_tags:
         embedded = embed_metadata(export_dir, documents)
-        typer.echo(f"Embedded metadata into {embedded} PDFs.")
+        typer.echo(
+            f"PDF metadata: {embedded.embedded} embedded, "
+            f"{embedded.skipped} skipped, {len(embedded.failed)} failed."
+        )
+        for failed in embedded.failed:
+            typer.secho(
+                f"  PDF metadata incomplete: {failed}",
+                fg=typer.colors.YELLOW,
+                err=True,
+            )
+        failures.extend(f"PDF metadata: {path}" for path in embedded.failed)
+
+    if tax_view:
+        result = build_tax_view(export_dir, documents, copy=copy, prefix=tax_tag_prefix)
+        typer.echo(
+            f"_Steuer view: {result.total} entries across years "
+            f"{', '.join(sorted(result.years)) or '—'} (see _Steuer/INDEX.csv)"
+        )
+        for missing in result.missing:
+            typer.secho(
+                f"  missing or non-regular, not materialized: {missing}",
+                fg=typer.colors.YELLOW,
+                err=True,
+            )
+        failures.extend(f"_Steuer source: {path}" for path in result.missing)
+
+    if failures:
+        joined = "\n".join(f"- {failure}" for failure in failures)
+        raise PartialOutputError(
+            f"Requested post-processing is incomplete ({len(failures)} failures):\n{joined}"
+        )
+    typer.echo("Requested post-processing complete.")
 
 
 @app.command()
@@ -148,6 +177,14 @@ def run(
         bool,
         typer.Option("--embed-tags", help="Embed tags into the exported PDFs' XMP (needs [pdf])."),
     ] = False,
+    passphrase_file: Annotated[
+        str,
+        typer.Option(
+            "--passphrase-file",
+            envvar="PAPERLESS_EXPORT_PASSPHRASE_FILE",
+            help="Protected passphrase file path; use '-' to read once from stdin.",
+        ),
+    ] = "",
     url: Annotated[
         str, typer.Option("--url", envvar="PAPERLESS_URL", help="Paperless URL (preflight check).")
     ] = "",
@@ -160,10 +197,19 @@ def run(
 
     def action() -> None:
         from .exporter import run_exporter
+        from .passphrase import load_passphrase
         from .preflight import check_api
 
+        passphrase = load_passphrase(passphrase_file) if passphrase_file else None
         if url:
             check_api(url, token)
+        if passphrase is None:
+            typer.secho(
+                "WARNING: no export passphrase is configured; Paperless may write supported "
+                "mail/social-account secret fields to the export in plaintext.",
+                fg=typer.colors.YELLOW,
+                err=True,
+            )
         result = run_exporter(
             exporter_cmd,
             exporter_target,
@@ -171,6 +217,7 @@ def run(
             compare_checksums=compare_checksums,
             delete=delete,
             fallback_on_long_paths=fallback,
+            passphrase=passphrase,
         )
         if not result.used_filename_format and filename_format:
             typer.secho(
@@ -179,9 +226,13 @@ def run(
                 err=True,
             )
         typer.echo("document_exporter finished.")
-        if tax_view:
-            _build_views(
-                export_dir, copy=copy, tax_tag_prefix=tax_tag_prefix, embed_tags=embed_tags
+        if tax_view or embed_tags:
+            _post_process(
+                export_dir,
+                copy=copy,
+                tax_tag_prefix=tax_tag_prefix,
+                embed_tags=embed_tags,
+                tax_view=tax_view,
             )
 
     _guarded(verbose, action)
@@ -209,8 +260,12 @@ def tax_view_cmd(
     """Rebuild only the _Steuer/YYYY view from an existing export (no exporter run)."""
     _guarded(
         verbose,
-        lambda: _build_views(
-            export_dir, copy=copy, tax_tag_prefix=tax_tag_prefix, embed_tags=embed_tags
+        lambda: _post_process(
+            export_dir,
+            copy=copy,
+            tax_tag_prefix=tax_tag_prefix,
+            embed_tags=embed_tags,
+            tax_view=True,
         ),
     )
 

@@ -6,6 +6,8 @@ EXIT_UNEXPECTED = 1
 EXIT_CONFIG = 2
 EXIT_UNREACHABLE = 3
 EXIT_OUTPUT = 4
+EXIT_PARTIAL = 5
+EXIT_EXPORTER_FAILED = 6
 
 
 class PaperlessExportError(Exception):
@@ -38,9 +40,21 @@ class OutputError(PaperlessExportError):
     exit_code = EXIT_OUTPUT
 
 
-class ExporterFailedError(PaperlessExportError):
-    """document_exporter exited non-zero; carries its exit code and stderr."""
+class UnsafeOutputError(OutputError):
+    """Manifest-derived or generated output escaped the export boundary."""
 
-    def __init__(self, message: str, exit_code: int) -> None:
+
+class PartialOutputError(PaperlessExportError):
+    """The exporter succeeded, but requested post-processing was incomplete."""
+
+    exit_code = EXIT_PARTIAL
+
+
+class ExporterFailedError(PaperlessExportError):
+    """document_exporter ran but failed; carries its original child code."""
+
+    exit_code = EXIT_EXPORTER_FAILED
+
+    def __init__(self, message: str, child_code: int) -> None:
         super().__init__(message)
-        self.exit_code = exit_code if exit_code != 0 else EXIT_UNEXPECTED
+        self.child_code = child_code

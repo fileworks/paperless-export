@@ -13,12 +13,13 @@ from .conftest import manifest_entries
 
 def _make_real_pdfs(export_dir: Path) -> None:
     for entry in manifest_entries():
-        name = entry.get("__exported_file_name__")
-        if name:
-            target = export_dir / str(name)
-            target.parent.mkdir(parents=True, exist_ok=True)
-            pdf = pikepdf.new()
-            pdf.save(target)
+        for key in ("__exported_file_name__", "__exported_archive_name__"):
+            name = entry.get(key)
+            if name:
+                target = export_dir / str(name)
+                target.parent.mkdir(parents=True, exist_ok=True)
+                pdf = pikepdf.new()
+                pdf.save(target)
 
 
 def test_embed_writes_xmp_metadata(tmp_path: Path) -> None:
@@ -28,8 +29,9 @@ def test_embed_writes_xmp_metadata(tmp_path: Path) -> None:
     _make_real_pdfs(export_dir)
 
     documents = load_documents(export_dir / "manifest.json")
-    embedded = embed_metadata(export_dir, documents)
-    assert embedded == 4
+    result = embed_metadata(export_dir, documents)
+    assert result.embedded == 5
+    assert result.failed == []
 
     pdf_path = export_dir / "Bescheid/Finanzamt/2024-05-01 Steuerbescheid 2024.pdf"
     with pikepdf.open(pdf_path) as pdf, pdf.open_metadata() as meta:
@@ -48,5 +50,20 @@ def test_embed_skips_broken_pdf_and_continues(tmp_path: Path) -> None:
     broken.write_bytes(b"not a pdf at all")
 
     documents = load_documents(export_dir / "manifest.json")
-    embedded = embed_metadata(export_dir, documents)
-    assert embedded == 3
+    result = embed_metadata(export_dir, documents)
+    assert result.embedded == 4
+    assert result.failed == ["Sonstiges/Allianz/2023-03-03 Haftpflicht Police.pdf"]
+
+
+def test_duplicate_original_and_archive_is_embedded_once(tmp_path: Path) -> None:
+    entries = manifest_entries()[:]
+    document = next(entry for entry in entries if entry.get("pk") == 10)
+    document["__exported_archive_name__"] = document["__exported_file_name__"]
+    export_dir = tmp_path / "export"
+    export_dir.mkdir()
+    (export_dir / "manifest.json").write_text(json.dumps(entries))
+    _make_real_pdfs(export_dir)
+
+    result = embed_metadata(export_dir, load_documents(export_dir / "manifest.json"))
+    assert result.embedded == 4
+    assert result.skipped == 1

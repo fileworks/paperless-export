@@ -10,12 +10,16 @@ versions, and a complete `manifest.json` (tags, correspondents, types, custom
 fields). This tool deliberately does **not** rebuild any of that. It:
 
 1. runs `document_exporter <target> --use-filename-format --compare-checksums --delete`
-   (each flag toggleable), surfacing failures honestly and **falling back to a
-   flat export with a clear warning when a path exceeds the OS limit**,
-2. reads `manifest.json` and builds `_Steuer/<YYYY>/` — one symlink (or copy)
-   per document tagged `Steuer-YYYY` — plus a greppable `_Steuer/INDEX.csv`,
-3. optionally embeds tags/correspondent/type into the exported PDFs' XMP
-   (`--embed-tags`, needs the `[pdf]` extra).
+   (each flag toggleable), streams progress with bounded diagnostics, and
+   **falls back to a flat export with a clear warning when a path exceeds the
+   OS limit**,
+2. optionally embeds metadata into each distinct exported original/archive PDF
+   before any derived copies are created,
+3. validates every manifest path inside the export root, then builds
+   `_Steuer/<YYYY>/` — one original-based symlink (or copy) per document tagged
+   `Steuer-YYYY` — plus a greppable `_Steuer/INDEX.csv`,
+4. reports incomplete requested projections explicitly rather than silently
+   omitting them.
 
 ```
 export/
@@ -46,11 +50,19 @@ until the normal release workflow runs.
 # the nightly job (run from the directory containing your compose file):
 paperless-export run --export-dir /volume1/paperless/export
 
+# protected secret-file path only; the passphrase value never enters argv/env:
+paperless-export run \
+  --export-dir /volume1/paperless/export \
+  --passphrase-file /run/secrets/paperless-export-passphrase
+
 # rebuild only the tax view from an existing export:
 paperless-export tax-view --export-dir /volume1/paperless/export
 
 # FAT/exFAT or cloud targets that don't preserve symlinks:
 paperless-export run --export-dir ./export --copy
+
+# embed originals and archive PDFs without creating _Steuer:
+paperless-export run --export-dir ./export --no-tax-view --embed-tags
 ```
 
 Notes:
@@ -61,10 +73,42 @@ Notes:
 - `PAPERLESS_URL` + `PAPERLESS_TOKEN` (env or flags) enable a preflight check
   so a bad token fails fast with a clear message — they're optional because the
   exporter itself runs inside the container and needs no API access.
-- `--embed-tags` rewrites the exported PDFs, which changes their checksums, so
-  those files are re-exported on the next `--compare-checksums` run. The
-  manifest already preserves all metadata — only embed if you want tags
-  *inside* the files.
+- `PAPERLESS_EXPORT_PASSPHRASE_FILE` is a path-only alias for
+  `--passphrase-file`. `-` reads the passphrase once from standard input.
+  Protected files must be regular, not symlinks, and mode `0600` on POSIX.
+- Passphrase transport is supported for the default
+  `docker compose exec -T webserver document_exporter` adapter. A custom
+  exporter command is rejected when a passphrase is configured unless this
+  project gains a separately reviewed stdin adapter for it.
+- `--embed-tags` rewrites each distinct original PDF and Paperless PDF/A
+  archive. Non-PDF originals are skipped. Embedding happens before `_Steuer`
+  copies, so copy mode receives the updated bytes. Rewrites change checksums,
+  so Paperless can re-export those files on the next
+  `--compare-checksums` run.
+
+## Passphrase and export security
+
+Without a passphrase, the command warns before launching Paperless because
+Paperless-ngx 2.20.x may store supported account secrets in plaintext.
+Paperless's native passphrase protects these fields:
+
+- mail-account `password` and `refresh_token`;
+- social-token `token` and `token_secret`.
+
+The passphrase does **not** encrypt the entire `manifest.json`, exported
+documents, or other metadata. Paperless records the cryptographic parameters
+in `metadata.json`, and a later import needs the same passphrase. Keep the
+passphrase in a secret-manager-mounted file (or provide it over stdin), make
+the export directory accessible only to the backup account, and protect backup
+copies with storage-level encryption. Do not put the secret value in a shell
+argument or environment variable.
+
+Every original and archive path read from `manifest.json` is treated as
+untrusted. Absolute paths, Windows drive/UNC forms, empty/malformed components,
+parent traversal, and symlink escapes are rejected before `_Steuer` is cleared
+or any PDF is opened. The same confinement is repeated immediately before
+file operations. Do not modify the export tree concurrently with
+post-processing.
 
 ## Behavior guarantees
 
@@ -72,21 +116,24 @@ Notes:
 - **Idempotent** — the `_Steuer/` view is rebuilt from scratch each run; safe nightly.
 - **Verifiable** — after a run, `_Steuer/2025/` contains exactly the documents
   tagged `Steuer-2025`; `INDEX.csv` matches a manifest query.
-- **Honest failures** — a non-zero `document_exporter` exit surfaces its output
-  and exit code; symlink-unsupported filesystems auto-switch to copies with a notice.
+- **Honest failures** — exporter, unavailable infrastructure, unsafe output,
+  and incomplete projections have separate stable exit categories. Missing
+  sources and PDF failures are aggregated while remaining safe work continues.
 - **Never silent** — `document_exporter`'s output is relayed live rather than
-  buffered until the end, so a long export is visibly working instead of looking
-  hung. The same output is what's scanned for the path-too-long fallback.
+  buffered until the end. Final errors repeat only the last 64 KiB diagnostic
+  tail; path-too-long detection covers the entire stream independently.
 
 ## Exit codes
 
 | Code | Meaning |
 |---|---|
-| 0 | success |
+| 0 | complete requested output, including successful advisory fallbacks |
+| 1 | unexpected wrapper failure |
 | 2 | bad configuration / authentication failure |
-| 3 | Paperless (or Docker) not reachable |
-| 4 | export dir missing / manifest unreadable |
-| *n* | `document_exporter` failed with exit code *n* |
+| 3 | Paperless API or Docker/Compose/service/container unavailable |
+| 4 | malformed, unsafe, missing, or fatally unwritable export output |
+| 5 | exporter succeeded but requested post-processing is incomplete |
+| 6 | `document_exporter` ran but failed (its child code remains in diagnostics) |
 
 ## Scheduling on a Synology (DSM Task Scheduler)
 
@@ -101,7 +148,8 @@ share covered by your backup chain.
 ## Development
 
 ```sh
-uv sync --all-extras --dev
+uv lock --check
+uv sync --locked --all-extras --dev
 uv run ruff check . && uv run ruff format --check .   # lint
 uv run mypy                                           # strict types
 uv run pytest                                         # tests
