@@ -10,7 +10,7 @@
   [`a788025`](https://github.com/fileworks/paperless-export/commit/a7880256cc9cfee21024a91de614d8a62e054793))
 
 Exporting thousands of documents takes minutes, and the output was captured and withheld until the
-  process exited — so a long, healthy export was indistinguish-able from a hung one. Its lines are
+  process exited — so a long, healthy export was indistinguishable from a hung one. Its lines are
   now relayed as they arrive.
 
 stderr is folded into stdout while doing it, because Paperless reports a failure on either depending
