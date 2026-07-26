@@ -1,6 +1,23 @@
 # CHANGELOG
 
 
+## v1.0.0 (2026-07-26)
+
+### Bug Fixes
+
+- Make release cleanup checkout-safe ([#8](https://github.com/fileworks/paperless-export/pull/8),
+  [`667d669`](https://github.com/fileworks/paperless-export/commit/667d669e7a625146111e3bd2753418dd3fbbefc2))
+
+- preserve the exact-SHA release gate
+
+- Secure exports with stable 5/6 exits ([#7](https://github.com/fileworks/paperless-export/pull/7),
+  [`ee01584`](https://github.com/fileworks/paperless-export/commit/ee01584c37ff3ff43e14d5f2b637d6654f14eb12))
+
+- Confine paths and protect passphrase transport
+
+- Bound diagnostics and verify locked releases
+
+
 ## v0.1.0 (2026-07-14)
 
 ### Features
@@ -10,7 +27,7 @@
   [`a788025`](https://github.com/fileworks/paperless-export/commit/a7880256cc9cfee21024a91de614d8a62e054793))
 
 Exporting thousands of documents takes minutes, and the output was captured and withheld until the
-  process exited — so a long, healthy export was indistinguishable from a hung one. Its lines are
+  process exited — so a long, healthy export was indistinguish-able from a hung one. Its lines are
   now relayed as they arrive.
 
 stderr is folded into stdout while doing it, because Paperless reports a failure on either depending
