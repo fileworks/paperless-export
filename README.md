@@ -1,3 +1,5 @@
+<img src=".github/icon.svg" alt="" width="72" height="72" align="left">
+
 # paperless-export
 
 A thin scheduled wrapper around [Paperless-ngx](https://docs.paperless-ngx.com)'s
@@ -30,6 +32,22 @@ export/
     INDEX.csv                                         # year,title,correspondent,created,original_path
 ```
 
+## Status
+
+Released **1.0.0** — verified on PyPI, as a GitHub Release, and through
+`fileworks/tap` on 2026-07-26. Development after that tag is unreleased
+until the release workflow runs.
+
+## Overview
+
+`paperless-export` wraps Paperless-ngx's own `document_exporter` and adds what
+it leaves out: a scheduled, verified run, streamed progress instead of silence,
+and an optional tax view (`_Steuer`) built from your existing tags.
+
+It is an escape hatch, not a backup — it produces a readable copy of what
+Paperless holds, so that Paperless never becomes the only place your documents
+exist.
+
 ## Install
 
 ```sh
@@ -38,9 +56,9 @@ pipx install paperless-export          # + 'paperless-export[pdf]' for --embed-t
 brew install fileworks/tap/paperless-export
 ```
 
-Version `0.1.0` is published on
-[PyPI](https://pypi.org/project/paperless-export/0.1.0/), as a
-[GitHub Release](https://github.com/fileworks/paperless-export/releases/tag/v0.1.0),
+Version `1.0.0` is published on
+[PyPI](https://pypi.org/project/paperless-export/1.0.0/), as a
+[GitHub Release](https://github.com/fileworks/paperless-export/releases/tag/v1.0.0),
 and through `fileworks/tap`. Development after that tag remains unreleased
 until the normal release workflow runs.
 
@@ -85,6 +103,16 @@ Notes:
   copies, so copy mode receives the updated bytes. Rewrites change checksums,
   so Paperless can re-export those files on the next
   `--compare-checksums` run.
+
+## Quick start
+
+```sh
+# from the directory holding your Paperless compose file
+paperless-export ~/paperless-export
+```
+
+The first run performs a full export. Later runs reuse what is already there and
+rebuild only what changed.
 
 ## Passphrase and export security
 
@@ -144,6 +172,32 @@ cd /volume1/docker/paperless && \
 
 Nightly, after the Paperless backup window; the export target should live on a
 share covered by your backup chain.
+
+## Configuration
+
+Configuration is by flag and environment variable; nothing is stored between
+runs.
+
+| Setting | Purpose |
+|---|---|
+| `--compose-file` | Path to the Paperless compose file (default: the working directory) |
+| `--passphrase-file` | File holding the export passphrase. The value never enters argv or the environment |
+| `--no-symlinks` | For FAT/exFAT and cloud targets that cannot represent links |
+| `--no-tax-view` | Skip building `_Steuer` |
+
+`--help` is authoritative.
+
+## Troubleshooting
+
+**The export appears to hang.** It does not — `document_exporter` used to buffer
+its output. Progress is now streamed; a long silence means a genuinely long step.
+
+**Exit code 5 or 6.** Five means the export completed but the tax view could not
+be built; six means a path was too long for the target filesystem. Both leave
+the exported documents intact.
+
+**Symlinks fail on the target.** Use `--no-symlinks`; the tax view is then built
+from copies.
 
 ## Development
 
