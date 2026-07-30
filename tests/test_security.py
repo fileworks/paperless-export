@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from paperless_export.embed import embed_metadata
-from paperless_export.errors import ConfigError, UnsafeOutputError
+from paperless_export.errors import ConfigError, OutputError, UnsafeOutputError
 from paperless_export.exporter import _run, _SecretRedactor, build_command, run_exporter
 from paperless_export.manifest import load_documents
 from paperless_export.passphrase import load_passphrase
@@ -120,14 +120,14 @@ def test_tax_view_rejects_operation_time_symlink_replacement(tmp_path: Path) -> 
     assert outside.read_bytes() == b"outside"
 
 
-def test_non_regular_confined_tax_source_is_reported_missing(tmp_path: Path) -> None:
+def test_non_regular_confined_tax_source_blocks_partial_publication(tmp_path: Path) -> None:
     export = tmp_path / "export"
     export.mkdir()
     (export / "not-a-file.pdf").mkdir()
     (export / "manifest.json").write_text(json.dumps(_tax_manifest("not-a-file.pdf")))
-    result = build_tax_view(export, load_documents(export / "manifest.json"))
-    assert result.missing == ["not-a-file.pdf"]
-    assert "not-a-file.pdf" not in (export / "_Steuer/INDEX.csv").read_text()
+    with pytest.raises(OutputError, match="missing or unreadable"):
+        build_tax_view(export, load_documents(export / "manifest.json"))
+    assert not (export / "_Steuer").exists()
 
 
 def test_unsafe_tax_root_is_rejected_without_outside_cleanup(tmp_path: Path) -> None:

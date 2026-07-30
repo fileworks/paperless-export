@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import importlib.metadata
 import logging
-import sys
+import time
 import traceback
 from collections.abc import Callable
 from pathlib import Path
@@ -14,6 +14,7 @@ import typer
 
 from . import __version__
 from .errors import EXIT_UNEXPECTED, PaperlessExportError, PartialOutputError
+from .logging_config import configure_logging, register_secret
 
 app = typer.Typer(add_completion=False, context_settings={"help_option_names": ["-h", "--help"]})
 
@@ -38,20 +39,31 @@ def main(
     """Paperless-ngx export wrapper + _Steuer/YYYY tax view."""
 
 
-def _guarded[T](verbose: bool, action: Callable[[], T]) -> T:
-    logging.basicConfig(
-        level=logging.DEBUG if verbose else logging.INFO,
-        format="%(levelname)s %(name)s: %(message)s" if verbose else "%(message)s",
-        stream=sys.stderr,
-    )
+def _guarded[T](
+    verbose: bool,
+    action: Callable[[], T],
+    *,
+    log_file: Path,
+    secrets: tuple[str, ...] = (),
+) -> T:
+    for secret in secrets:
+        register_secret(secret)
+    configure_logging(log_file, verbose=verbose)
+    logging.getLogger(__name__).info("paperless-export started; logfile=%s", log_file)
     try:
-        return action()
+        result = action()
+        logging.getLogger(__name__).info("paperless-export completed successfully")
+        return result
     except PaperlessExportError as exc:
+        logging.getLogger(__name__).error(
+            "paperless-export failed exit_code=%s: %s", exc.exit_code, exc
+        )
         if verbose:
             traceback.print_exc()
         typer.secho(str(exc), fg=typer.colors.RED, err=True)
         raise typer.Exit(code=exc.exit_code) from exc
     except Exception as exc:
+        logging.getLogger(__name__).exception("paperless-export failed unexpectedly")
         if verbose:
             traceback.print_exc()
         typer.secho(
@@ -74,13 +86,16 @@ def _post_process(
     from .manifest import load_documents
     from .taxview import build_tax_view, validate_tax_view_root
 
+    reporter = _ProgressReporter()
+    reporter("manifest", 0, 0, 0, 0.0, 0.0)
     documents = load_documents(export_dir / "manifest.json")
+    reporter("manifest", len(documents), len(documents), 0, 0.0, 0.0)
     if tax_view:
         validate_tax_view_root(export_dir)
 
     failures: list[str] = []
     if embed_tags:
-        embedded = embed_metadata(export_dir, documents)
+        embedded = embed_metadata(export_dir, documents, on_progress=reporter)
         typer.echo(
             f"PDF metadata: {embedded.embedded} embedded, "
             f"{embedded.skipped} skipped, {len(embedded.failed)} failed."
@@ -94,7 +109,13 @@ def _post_process(
         failures.extend(f"PDF metadata: {path}" for path in embedded.failed)
 
     if tax_view:
-        result = build_tax_view(export_dir, documents, copy=copy, prefix=tax_tag_prefix)
+        result = build_tax_view(
+            export_dir,
+            documents,
+            copy=copy,
+            prefix=tax_tag_prefix,
+            on_progress=reporter,
+        )
         typer.echo(
             f"_Steuer view: {result.total} entries across years "
             f"{', '.join(sorted(result.years)) or '—'} (see _Steuer/INDEX.csv)"
@@ -113,6 +134,40 @@ def _post_process(
             f"Requested post-processing is incomplete ({len(failures)} failures):\n{joined}"
         )
     typer.echo("Requested post-processing complete.")
+
+
+class _ProgressReporter:
+    """Rate-limited phase progress shared by console and persistent logs."""
+
+    def __init__(self, *, interval_seconds: float = 1.0) -> None:
+        self.interval_seconds = interval_seconds
+        self._last_emit = 0.0
+        self._phase = ""
+
+    def __call__(
+        self,
+        phase: str,
+        current: int,
+        total: int,
+        failures: int,
+        rate: float,
+        elapsed: float,
+    ) -> None:
+        now = time.monotonic()
+        if (
+            phase == self._phase
+            and current != total
+            and now - self._last_emit < self.interval_seconds
+        ):
+            return
+        self._phase = phase
+        self._last_emit = now
+        total_text = str(total) if total else "?"
+        message = (
+            f"Progress phase={phase} current={current} total={total_text} "
+            f"failures={failures} rate={rate:.1f}/s elapsed={elapsed:.1f}s"
+        )
+        logging.getLogger(__name__).info(message)
 
 
 @app.command()
@@ -191,6 +246,14 @@ def run(
     token: Annotated[
         str, typer.Option("--token", envvar="PAPERLESS_TOKEN", help="Paperless API token.")
     ] = "",
+    log_file: Annotated[
+        Path | None,
+        typer.Option(
+            "--log-file",
+            envvar="PAPERLESS_EXPORT_LOG_FILE",
+            help="Rotating logfile (default: beside the export directory).",
+        ),
+    ] = None,
     verbose: Annotated[bool, typer.Option("--verbose", "-v")] = False,
 ) -> None:
     """Run document_exporter, then build the _Steuer/YYYY tax view (the nightly job)."""
@@ -201,6 +264,7 @@ def run(
         from .preflight import check_api
 
         passphrase = load_passphrase(passphrase_file) if passphrase_file else None
+        register_secret(passphrase)
         if url:
             check_api(url, token)
         if passphrase is None:
@@ -210,6 +274,8 @@ def run(
                 fg=typer.colors.YELLOW,
                 err=True,
             )
+        exporter_progress = _ProgressReporter()
+        exporter_progress("native_exporter", 0, 0, 0, 0.0, 0.0)
         result = run_exporter(
             exporter_cmd,
             exporter_target,
@@ -219,6 +285,7 @@ def run(
             fallback_on_long_paths=fallback,
             passphrase=passphrase,
         )
+        exporter_progress("native_exporter", 1, 1, 0, 0.0, 0.0)
         if not result.used_filename_format and filename_format:
             typer.secho(
                 "Note: fell back to a flat export (path too long) — see log above.",
@@ -235,7 +302,12 @@ def run(
                 tax_view=tax_view,
             )
 
-    _guarded(verbose, action)
+    _guarded(
+        verbose,
+        action,
+        log_file=log_file or export_dir.parent / "paperless-export.log",
+        secrets=(token,),
+    )
 
 
 @app.command(name="tax-view")
@@ -255,6 +327,14 @@ def tax_view_cmd(
         bool,
         typer.Option("--embed-tags", help="Embed tags into the exported PDFs' XMP (needs [pdf])."),
     ] = False,
+    log_file: Annotated[
+        Path | None,
+        typer.Option(
+            "--log-file",
+            envvar="PAPERLESS_EXPORT_LOG_FILE",
+            help="Rotating logfile (default: beside the export directory).",
+        ),
+    ] = None,
     verbose: Annotated[bool, typer.Option("--verbose", "-v")] = False,
 ) -> None:
     """Rebuild only the _Steuer/YYYY view from an existing export (no exporter run)."""
@@ -267,6 +347,7 @@ def tax_view_cmd(
             embed_tags=embed_tags,
             tax_view=True,
         ),
+        log_file=log_file or export_dir.parent / "paperless-export.log",
     )
 
 

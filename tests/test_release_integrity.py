@@ -51,11 +51,11 @@ def _artifacts(dist: Path, version: str) -> None:
 
 
 def test_new_release_must_be_newer_and_match_tag() -> None:
-    require_new_version("0.1.1", "v0.1.1")
+    require_new_version("1.0.1", "v1.0.1")
     with pytest.raises(ReleaseIntegrityError, match="newer"):
-        require_new_version("0.1.0", "v0.1.0")
+        require_new_version("1.0.0", "v1.0.0")
     with pytest.raises(ReleaseIntegrityError, match="does not identify"):
-        require_new_version("0.1.1", "v0.1.2")
+        require_new_version("1.0.1", "v1.0.2")
 
 
 def test_lock_version_is_part_of_source_identity(tmp_path: Path) -> None:

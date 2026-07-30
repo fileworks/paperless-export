@@ -17,6 +17,58 @@ from paperless_export.exporter import ExporterRun
 runner = CliRunner()
 
 
+def _declared_options(*command_path: str) -> set[str]:
+    """Every `--option` a command actually declares.
+
+    Read from the command tree rather than from `--help`, because the rendered
+    help is Rich's output: it wraps, colours and boxes to the terminal it thinks
+    it has. Asserting against it made this a function of the runner's width — it
+    passed locally and failed on every CI platform, where the help rendered at 80
+    columns and the option names were not in the text at all.
+
+    The contract is "the README documents the options that exist", and the
+    declarations are what "exist" means.
+    """
+    import typer.main
+
+    command: object = typer.main.get_command(app)
+    for name in command_path:
+        command = getattr(command, "commands", {})[name]
+    return {
+        opt
+        for parameter in getattr(command, "params", [])
+        # `secondary_opts` too: a boolean flag declares `--tax-view` in `opts`
+        # and `--no-tax-view` here, and the README documents the negative form.
+        for opt in (getattr(parameter, "opts", []) or [])
+        + (getattr(parameter, "secondary_opts", []) or [])
+        if opt.startswith("--")
+    }
+
+
+def test_documented_commands_options_and_environment_aliases_match_cli() -> None:
+    readme = (Path(__file__).parents[1] / "README.md").read_text(encoding="utf-8")
+    run_options = _declared_options("run")
+    tax_options = _declared_options("tax-view")
+
+    for option in (
+        "--export-dir",
+        "--exporter-cmd",
+        "--exporter-target",
+        "--passphrase-file",
+        "--copy",
+        "--no-tax-view",
+        "--log-file",
+    ):
+        assert option in run_options
+        assert option in readme
+    assert "paperless-export run --export-dir ~/paperless-export" in readme
+    assert "PAPERLESS_EXPORT_PASSPHRASE_FILE" in readme
+    assert "PAPERLESS_EXPORT_LOG_FILE" in readme
+    assert "--copy" in tax_options
+    assert "--no-symlinks" not in readme
+    assert "--compose-file" not in readme
+
+
 def test_version_flag() -> None:
     result = runner.invoke(app, ["--version"])
     assert result.exit_code == 0
@@ -25,11 +77,9 @@ def test_version_flag() -> None:
 
 def test_tax_view_command(export_dir: Path) -> None:
     result = runner.invoke(app, ["tax-view", "--export-dir", str(export_dir)])
-    assert result.exit_code == 5
-    assert "_Steuer view: 3 entries" in result.output
-    assert "2024, 2025" in result.output
-    assert "Requested post-processing is incomplete" in result.output
-    assert (export_dir / "_Steuer/INDEX.csv").is_file()
+    assert result.exit_code == 4
+    assert "required source files are missing or unreadable" in result.output
+    assert not (export_dir / "_Steuer").exists()
 
 
 def test_tax_view_missing_manifest_exits_4(tmp_path: Path) -> None:
@@ -37,6 +87,20 @@ def test_tax_view_missing_manifest_exits_4(tmp_path: Path) -> None:
     assert result.exit_code == 4
     assert "No manifest" in result.output
     assert "Traceback" not in result.output
+
+
+def test_logfile_environment_alias_is_executed(tmp_path: Path) -> None:
+    logfile = tmp_path / "logs" / "scheduled.log"
+
+    result = runner.invoke(
+        app,
+        ["tax-view", "--export-dir", str(tmp_path)],
+        env={"PAPERLESS_EXPORT_LOG_FILE": str(logfile)},
+    )
+
+    assert result.exit_code == 4
+    assert logfile.is_file()
+    assert "No manifest" in logfile.read_text()
 
 
 def test_run_end_to_end_with_fake_exporter(export_dir: Path, fake_exporter: Path) -> None:
@@ -77,6 +141,29 @@ def test_run_exporter_failure_propagates_exit_code(export_dir: Path, tmp_path: P
     assert "child exit 7" in result.output
     assert "kaputt" in result.output
     assert "Traceback" not in result.output
+
+
+def test_exporter_failure_preserves_existing_tax_view(export_dir: Path, tmp_path: Path) -> None:
+    current = export_dir / "_Steuer"
+    current.mkdir()
+    marker = current / "complete.txt"
+    marker.write_text("old")
+    script = tmp_path / "boom.py"
+    script.write_text("raise SystemExit(7)\n")
+
+    result = runner.invoke(
+        app,
+        [
+            "run",
+            "--export-dir",
+            str(export_dir),
+            "--exporter-cmd",
+            f"{sys.executable} {script}",
+        ],
+    )
+
+    assert result.exit_code == 6
+    assert marker.read_text() == "old"
 
 
 def test_run_without_projections_does_not_require_manifest(
@@ -211,10 +298,10 @@ def test_partial_summary_aggregates_pdf_and_tax_failures(export_dir: Path) -> No
         app,
         ["tax-view", "--export-dir", str(export_dir), "--embed-tags"],
     )
-    assert result.exit_code == 5
+    assert result.exit_code == 4
     assert "PDF metadata incomplete" in result.output
-    assert "missing or non-regular" in result.output
-    assert "Requested post-processing is incomplete" in result.output
+    assert "required source files are missing or unreadable" in result.output
+    assert not (export_dir / "_Steuer").exists()
 
 
 def test_plaintext_warning_precedes_exporter_start(tmp_path: Path) -> None:
