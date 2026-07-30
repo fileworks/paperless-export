@@ -13,6 +13,7 @@ from typing import NoReturn
 from .errors import ConfigError, ExporterFailedError, ServerUnreachableError
 
 logger = logging.getLogger(__name__)
+transcript_logger = logging.getLogger(f"{__name__}.transcript")
 
 DEFAULT_EXPORTER_CMD = "docker compose exec -T webserver document_exporter"
 DEFAULT_TARGET = "../export"
@@ -199,13 +200,16 @@ def _run(
                 if text:
                     sys.stderr.write(text)
                     sys.stderr.flush()
+                    transcript_logger.debug("document_exporter output: %s", text.rstrip())
 
     final_chunk = redactor.feed(b"", final=True)
     if final_chunk:
         signals.observe(final_chunk)
         _bounded_tail(tail, final_chunk)
         if echo:
-            sys.stderr.write(decoder.decode(final_chunk))
+            text = decoder.decode(final_chunk)
+            sys.stderr.write(text)
+            transcript_logger.debug("document_exporter output: %s", text.rstrip())
     if echo:
         remainder = decoder.decode(b"", final=True)
         if remainder:

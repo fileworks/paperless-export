@@ -9,6 +9,8 @@ preserves all metadata, so only enable this if you want tags *inside* the files.
 from __future__ import annotations
 
 import logging
+import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -33,7 +35,12 @@ def _pdf_targets(doc: ExportedDocument) -> list[ConfinedPath]:
     return [target for target in targets if target.relative.suffix.lower() == ".pdf"]
 
 
-def embed_metadata(_export_dir: Path, documents: list[ExportedDocument]) -> EmbedResult:
+def embed_metadata(
+    _export_dir: Path,
+    documents: list[ExportedDocument],
+    *,
+    on_progress: Callable[[str, int, int, int, float, float], None] | None = None,
+) -> EmbedResult:
     """Write metadata into each distinct confined original/archive PDF."""
     try:
         import pikepdf
@@ -44,6 +51,9 @@ def embed_metadata(_export_dir: Path, documents: list[ExportedDocument]) -> Embe
 
     result = EmbedResult()
     seen: set[tuple[int, int] | Path] = set()
+    total = sum(len(_pdf_targets(document)) for document in documents)
+    completed = 0
+    started = time.monotonic()
     for doc in documents:
         targets = _pdf_targets(doc)
         result.skipped += int(not targets)
@@ -85,4 +95,15 @@ def embed_metadata(_export_dir: Path, documents: list[ExportedDocument]) -> Embe
                     type(exc).__name__,
                 )
                 result.failed.append(target.display)
+            completed += 1
+            if on_progress is not None:
+                elapsed = max(0.0, time.monotonic() - started)
+                on_progress(
+                    "pdf_metadata",
+                    completed,
+                    total,
+                    len(result.failed),
+                    completed / elapsed if elapsed else 0.0,
+                    elapsed,
+                )
     return result

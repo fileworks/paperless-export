@@ -20,8 +20,8 @@ fields). This tool deliberately does **not** rebuild any of that. It:
 3. validates every manifest path inside the export root, then builds
    `_Steuer/<YYYY>/` — one original-based symlink (or copy) per document tagged
    `Steuer-YYYY` — plus a greppable `_Steuer/INDEX.csv`,
-4. reports incomplete requested projections explicitly rather than silently
-   omitting them.
+4. publishes the derived view only after every required source and staged output
+   validates; a failed replacement leaves the prior complete `_Steuer` current.
 
 ```
 export/
@@ -94,6 +94,9 @@ Notes:
 - `PAPERLESS_EXPORT_PASSPHRASE_FILE` is a path-only alias for
   `--passphrase-file`. `-` reads the passphrase once from standard input.
   Protected files must be regular, not symlinks, and mode `0600` on POSIX.
+- `PAPERLESS_EXPORT_LOG_FILE` is the environment alias for `--log-file`.
+  Without it, a bounded rotating `paperless-export.log` is written beside the
+  export directory for unattended-job diagnostics.
 - Passphrase transport is supported for the default
   `docker compose exec -T webserver document_exporter` adapter. A custom
   exporter command is rejected when a passphrase is configured unless this
@@ -108,7 +111,7 @@ Notes:
 
 ```sh
 # from the directory holding your Paperless compose file
-paperless-export ~/paperless-export
+paperless-export run --export-dir ~/paperless-export
 ```
 
 The first run performs a full export. Later runs reuse what is already there and
@@ -141,12 +144,15 @@ post-processing.
 ## Behavior guarantees
 
 - **Read-only against Paperless** — writes only into the export directory.
-- **Idempotent** — the `_Steuer/` view is rebuilt from scratch each run; safe nightly.
+- **Atomic derived view** — `_Steuer/` is built in a confined same-filesystem
+  sibling stage and journalled through publication. Missing sources, copy/link
+  failures, and interruptions preserve the last complete view.
 - **Verifiable** — after a run, `_Steuer/2025/` contains exactly the documents
   tagged `Steuer-2025`; `INDEX.csv` matches a manifest query.
 - **Honest failures** — exporter, unavailable infrastructure, unsafe output,
-  and incomplete projections have separate stable exit categories. Missing
-  sources and PDF failures are aggregated while remaining safe work continues.
+  and incomplete PDF metadata have separate stable exit categories. A missing
+  tax-view source is a fatal output error because publishing a partial view is
+  forbidden.
 - **Never silent** — `document_exporter`'s output is relayed live rather than
   buffered until the end. Final errors repeat only the last 64 KiB diagnostic
   tail; path-too-long detection covers the entire stream independently.
@@ -180,10 +186,12 @@ runs.
 
 | Setting | Purpose |
 |---|---|
-| `--compose-file` | Path to the Paperless compose file (default: the working directory) |
+| `--exporter-cmd` | Exporter invocation; defaults to Docker Compose in the working directory |
+| `--exporter-target` | Export path as seen inside the exporter container |
 | `--passphrase-file` | File holding the export passphrase. The value never enters argv or the environment |
-| `--no-symlinks` | For FAT/exFAT and cloud targets that cannot represent links |
+| `--copy` | Use verified copies in `_Steuer` instead of symlinks |
 | `--no-tax-view` | Skip building `_Steuer` |
+| `--log-file` | Bounded rotating logfile path |
 
 `--help` is authoritative.
 
@@ -192,11 +200,13 @@ runs.
 **The export appears to hang.** It does not — `document_exporter` used to buffer
 its output. Progress is now streamed; a long silence means a genuinely long step.
 
-**Exit code 5 or 6.** Five means the export completed but the tax view could not
-be built; six means a path was too long for the target filesystem. Both leave
-the exported documents intact.
+**Exit code 4, 5, or 6.** Four means exported output is missing, unsafe, or
+cannot be published; five means non-fatal requested post-processing (currently
+PDF metadata embedding) is incomplete; six means `document_exporter` itself
+failed. All three leave Paperless originals untouched, and tax-view publication
+failures retain the previous complete `_Steuer`.
 
-**Symlinks fail on the target.** Use `--no-symlinks`; the tax view is then built
+**Symlinks fail on the target.** Use `--copy`; the tax view is then built
 from copies.
 
 ## Development
