@@ -1,6 +1,64 @@
 # CHANGELOG
 
 
+## v1.1.0 (2026-07-30)
+
+### Features
+
+- Publish tax-view projections atomically
+  ([#9](https://github.com/fileworks/paperless-export/pull/9),
+  [`d60ecf3`](https://github.com/fileworks/paperless-export/commit/d60ecf317223af9c05204614bc6bf9c5a059e69e))
+
+* fix: align release integrity gates
+
+* feat: publish tax-view projections atomically
+
+A projection was written in place, so an interrupted post-process left a half-written tax view that
+  looked complete. Projections are now staged and moved into place atomically, and an interrupted
+  run leaves the previous view intact rather than a partial one.
+
+Adds structured logging with a configured level in place of bare prints.
+
+Owned by the `publish-paperless-projections-atomically` OpenSpec change.
+
+* test: check documented options against declarations, not rendered help
+
+The test asserted each option appeared in `--help` output, which is Rich's render: it wraps, colours
+  and boxes to the terminal it thinks it has. That made the assertion a function of the runner's
+  width — it passed locally and failed on all three CI platforms, where help rendered at 80 columns
+  and the option names were not in the text at all.
+
+The contract is "the README documents the options that exist", so it now reads the command tree,
+  including `secondary_opts` so a flag's negative form (`--no-tax-view`) is found where Typer
+  actually puts it.
+
+* fix: tolerate windows refusing fsync on a read-only handle
+
+The durability step opened each published file 'rb' and fsynced it. POSIX allows that; Windows does
+  not — os.fsync reaches _commit, which needs a writable handle, so it raised EBADF on every file
+  and failed the whole publication.
+
+Now tolerated, matching _fsync_directory, which already swallows the same refusal for directory
+  handles. This weakens the explicit flush on Windows; failing the publish outright would have made
+  an atomic tax view impossible there at all.
+
+* fix: split the exporter command portably
+
+shlex.split defaults to POSIX rules, where a backslash escapes the next character. On Windows that
+  silently destroyed every path it was given: 'C:\hostedtoolcache\Python\3.12\x64\python.exe' came
+  back as 'C:hostedtoolcachePython3.12x64python.exe', so the exporter could not be launched and four
+  CLI tests exited 3 instead of running.
+
+Also fixes the passphrase source check: Windows cannot open a directory as a descriptor, so a
+  directory failed at os.open and was reported as 'must not be a symlink', never reaching the
+  S_ISREG check that says what is actually wrong. The two platforms gave different messages for the
+  same mistake.
+
+---------
+
+Co-authored-by: gykonik <gykonik@gmail.com>
+
+
 ## v1.0.0 (2026-07-26)
 
 ### Bug Fixes
