@@ -411,9 +411,28 @@ def _sync_tree(root: Path) -> None:
             path = current / name
             if path.is_symlink():
                 continue
-            with path.open("rb") as handle:
-                os.fsync(handle.fileno())
+            _fsync_file(path)
         _fsync_directory(current)
+
+
+def _fsync_file(path: Path) -> None:
+    """Flush one file to disk, where the platform allows it.
+
+    POSIX fsyncs a read-only descriptor happily. Windows does not: `os.fsync`
+    reaches `_commit`, which needs a writable handle, and raises EBADF on every
+    file — so the durability step failed the whole publication on Windows rather
+    than merely being unavailable there.
+
+    Tolerated rather than forced, matching `_fsync_directory`, which already
+    swallows the same refusal for directory handles. Losing the explicit flush
+    weakens durability on that platform; failing the publish outright would have
+    made an atomic tax view impossible there at all, which is worse.
+    """
+    try:
+        with path.open("rb") as handle:
+            os.fsync(handle.fileno())
+    except OSError:
+        return
 
 
 def _fsync_directory(path: Path) -> None:
