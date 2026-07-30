@@ -17,12 +17,39 @@ from paperless_export.exporter import ExporterRun
 runner = CliRunner()
 
 
+def _declared_options(*command_path: str) -> set[str]:
+    """Every `--option` a command actually declares.
+
+    Read from the command tree rather than from `--help`, because the rendered
+    help is Rich's output: it wraps, colours and boxes to the terminal it thinks
+    it has. Asserting against it made this a function of the runner's width — it
+    passed locally and failed on every CI platform, where the help rendered at 80
+    columns and the option names were not in the text at all.
+
+    The contract is "the README documents the options that exist", and the
+    declarations are what "exist" means.
+    """
+    import typer.main
+
+    command: object = typer.main.get_command(app)
+    for name in command_path:
+        command = getattr(command, "commands", {})[name]
+    return {
+        opt
+        for parameter in getattr(command, "params", [])
+        # `secondary_opts` too: a boolean flag declares `--tax-view` in `opts`
+        # and `--no-tax-view` here, and the README documents the negative form.
+        for opt in (getattr(parameter, "opts", []) or [])
+        + (getattr(parameter, "secondary_opts", []) or [])
+        if opt.startswith("--")
+    }
+
+
 def test_documented_commands_options_and_environment_aliases_match_cli() -> None:
     readme = (Path(__file__).parents[1] / "README.md").read_text(encoding="utf-8")
-    run_help = runner.invoke(app, ["run", "--help"])
-    tax_help = runner.invoke(app, ["tax-view", "--help"])
+    run_options = _declared_options("run")
+    tax_options = _declared_options("tax-view")
 
-    assert run_help.exit_code == tax_help.exit_code == 0
     for option in (
         "--export-dir",
         "--exporter-cmd",
@@ -32,12 +59,12 @@ def test_documented_commands_options_and_environment_aliases_match_cli() -> None
         "--no-tax-view",
         "--log-file",
     ):
-        assert option in run_help.output
+        assert option in run_options
         assert option in readme
     assert "paperless-export run --export-dir ~/paperless-export" in readme
     assert "PAPERLESS_EXPORT_PASSPHRASE_FILE" in readme
     assert "PAPERLESS_EXPORT_LOG_FILE" in readme
-    assert "--copy" in tax_help.output
+    assert "--copy" in tax_options
     assert "--no-symlinks" not in readme
     assert "--compose-file" not in readme
 
