@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import codecs
 import logging
+import os
 import shlex
 import subprocess
 import sys
@@ -21,7 +22,24 @@ DIAGNOSTIC_TAIL_BYTES = 64 * 1024
 STREAM_CHUNK_BYTES = 8 * 1024
 MAX_PASSPHRASE_BYTES = 4096
 
-_DEFAULT_EXPORTER_TOKENS = shlex.split(DEFAULT_EXPORTER_CMD)
+
+def split_command(command: str) -> list[str]:
+    """Split a command string into argv, portably.
+
+    `shlex.split` defaults to POSIX rules, where a backslash escapes the next
+    character. On Windows that silently destroys every path it is given:
+    `C:\\Python\\python.exe` came back as `C:Pythonpython.exe`, so the exporter
+    could not be launched at all and every run exited 3.
+
+    Non-POSIX mode keeps backslashes but leaves quotes attached to the tokens it
+    produces, so they are stripped here.
+    """
+    if os.name == "nt":
+        return [token.strip('"') for token in shlex.split(command, posix=False)]
+    return shlex.split(command)
+
+
+_DEFAULT_EXPORTER_TOKENS = split_command(DEFAULT_EXPORTER_CMD)
 _PASSPHRASE_BRIDGE = (
     "import sys,django;"
     "django.setup();"
@@ -113,7 +131,7 @@ def _is_docker_command(command: list[str]) -> bool:
 
 
 def _secure_base_command(exporter_cmd: str) -> list[str]:
-    tokens = shlex.split(exporter_cmd)
+    tokens = split_command(exporter_cmd)
     if tokens != _DEFAULT_EXPORTER_TOKENS:
         raise ConfigError(
             "A passphrase requires the supported Docker Compose exporter command. "
@@ -132,7 +150,9 @@ def build_command(
     delete: bool,
     secure_passphrase: bool = False,
 ) -> list[str]:
-    command = _secure_base_command(exporter_cmd) if secure_passphrase else shlex.split(exporter_cmd)
+    command = (
+        _secure_base_command(exporter_cmd) if secure_passphrase else split_command(exporter_cmd)
+    )
     command = [*command, target]
     if filename_format:
         command.append("--use-filename-format")

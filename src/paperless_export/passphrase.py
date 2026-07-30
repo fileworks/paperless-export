@@ -45,6 +45,13 @@ def load_passphrase(source: str, *, stdin: TextIO | None = None) -> str:
             f"Cannot open the protected passphrase file {path}: "
             "it must exist and must not be a symlink."
         )
+    # Before opening, because Windows cannot open a directory as a descriptor at
+    # all: it failed here and reported "must not be a symlink", never reaching
+    # the S_ISREG check below that says what is actually wrong. POSIX opens the
+    # directory happily and reaches it, so the two platforms disagreed about the
+    # message for the same mistake.
+    if path.is_dir():
+        raise ConfigError(f"The passphrase source {path} is not a regular file.")
     flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
     try:
         descriptor = os.open(path, flags)
