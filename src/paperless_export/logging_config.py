@@ -3,22 +3,60 @@
 from __future__ import annotations
 
 import logging
+import re
 import sys
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 LOG_MAX_BYTES = 5 * 1024 * 1024
 LOG_BACKUPS = 3
 _secrets: set[str] = set()
+_URL_PATTERN = re.compile(r"https?://[^\s)\]}>\"']+", re.IGNORECASE)
+_SENSITIVE_QUERY_KEY = re.compile(
+    r"(?:api[-_]?key|auth|authorization|credential|key|pass(?:phrase|word)?|secret|token)",
+    re.IGNORECASE,
+)
+
+
+def sanitize_url(value: str) -> str:
+    """Return a useful URL representation without embedded credentials."""
+    try:
+        parsed = urlsplit(value)
+    except ValueError:
+        return "[REDACTED URL]"
+    if parsed.scheme.lower() not in {"http", "https"} or not parsed.hostname:
+        return "[REDACTED URL]"
+    host = parsed.hostname
+    if ":" in host and not host.startswith("["):
+        host = f"[{host}]"
+    try:
+        port = parsed.port
+    except ValueError:
+        port = None
+    if port is not None:
+        host = f"{host}:{port}"
+    query = urlencode(
+        [
+            (key, "[REDACTED]" if _SENSITIVE_QUERY_KEY.search(key) else item)
+            for key, item in parse_qsl(parsed.query, keep_blank_values=True)
+        ]
+    )
+    return urlunsplit((parsed.scheme, host, parsed.path, query, parsed.fragment))
+
+
+def sanitize_text(value: str) -> str:
+    """Redact registered secrets and credentials embedded in arbitrary text."""
+    message = _URL_PATTERN.sub(lambda match: sanitize_url(match.group(0)), value)
+    for secret in sorted(_secrets, key=len, reverse=True):
+        if secret:
+            message = message.replace(secret, "[REDACTED]")
+    return message
 
 
 class _RedactingFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
-        message = record.getMessage()
-        for secret in sorted(_secrets, key=len, reverse=True):
-            if secret:
-                message = message.replace(secret, "[REDACTED]")
-        record.msg = message
+        record.msg = sanitize_text(record.getMessage())
         record.args = ()
         return True
 

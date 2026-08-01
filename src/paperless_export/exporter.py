@@ -5,13 +5,18 @@ from __future__ import annotations
 import codecs
 import logging
 import os
+import queue
 import shlex
 import subprocess
 import sys
+import threading
+import time
 from dataclasses import dataclass
 from typing import NoReturn
 
 from .errors import ConfigError, ExporterFailedError, ServerUnreachableError
+from .logging_config import sanitize_text
+from .progress import snapshot
 
 logger = logging.getLogger(__name__)
 transcript_logger = logging.getLogger(f"{__name__}.transcript")
@@ -21,6 +26,8 @@ DEFAULT_TARGET = "../export"
 DIAGNOSTIC_TAIL_BYTES = 64 * 1024
 STREAM_CHUNK_BYTES = 8 * 1024
 MAX_PASSPHRASE_BYTES = 4096
+DEFAULT_EXPORT_TIMEOUT_SECONDS = 6 * 60 * 60
+HEARTBEAT_SECONDS = 5.0
 
 
 def split_command(command: str) -> list[str]:
@@ -174,8 +181,9 @@ def _run(
     *,
     stdin_value: str | None = None,
     echo: bool = True,
+    timeout_seconds: float = DEFAULT_EXPORT_TIMEOUT_SECONDS,
 ) -> _Completed:
-    """Relay bounded chunks live while retaining only a fixed-size safe tail."""
+    """Relay child output without blocking heartbeat, timeout, or cancellation."""
     logger.info("Running: %s", shlex.join(command))
     secret = stdin_value.encode("utf-8") if stdin_value is not None else None
     if secret is not None and len(secret) > MAX_PASSPHRASE_BYTES:
@@ -210,30 +218,92 @@ def _run(
     decoder = codecs.getincrementaldecoder("utf-8")("replace")
     tail = bytearray()
     assert process.stdout is not None
-    with process.stdout as stream:
-        while chunk := stream.read(STREAM_CHUNK_BYTES):
-            safe_chunk = redactor.feed(chunk)
-            signals.observe(safe_chunk)
-            _bounded_tail(tail, safe_chunk)
-            if echo:
-                text = decoder.decode(safe_chunk)
-                if text:
-                    sys.stderr.write(text)
+    chunks: queue.Queue[bytes | None] = queue.Queue(maxsize=16)
+
+    def read_output() -> None:
+        assert process.stdout is not None
+        try:
+            while chunk := process.stdout.read(STREAM_CHUNK_BYTES):
+                chunks.put(chunk)
+        finally:
+            chunks.put(None)
+
+    reader = threading.Thread(target=read_output, name="paperless-export-output", daemon=True)
+    reader.start()
+    started = time.monotonic()
+    last_heartbeat = started
+    output_bytes = 0
+    finished = False
+    try:
+        while not finished:
+            now = time.monotonic()
+            if timeout_seconds > 0 and now - started >= timeout_seconds:
+                _stop_child(process)
+                raise ExporterFailedError(
+                    f"document_exporter exceeded the configured {timeout_seconds:g}s timeout; "
+                    "the child was terminated and committed Paperless output was left intact.",
+                    124,
+                )
+            try:
+                chunk = chunks.get(timeout=min(0.25, max(0.01, HEARTBEAT_SECONDS)))
+            except queue.Empty:
+                chunk = b""
+            if chunk is None:
+                finished = True
+                continue
+            if chunk:
+                safe_chunk = redactor.feed(chunk)
+                output_bytes += len(safe_chunk)
+                signals.observe(safe_chunk)
+                _bounded_tail(tail, safe_chunk)
+                if echo:
+                    text = decoder.decode(safe_chunk)
+                    if text:
+                        safe_text = sanitize_text(text)
+                        sys.stderr.write(safe_text)
+                        sys.stderr.flush()
+                        transcript_logger.debug(
+                            "document_exporter output: %s",
+                            safe_text.rstrip(),
+                        )
+            now = time.monotonic()
+            if now - last_heartbeat >= HEARTBEAT_SECONDS:
+                elapsed = now - started
+                event = snapshot(
+                    "exporter",
+                    output_bytes,
+                    None,
+                    0,
+                    output_bytes / elapsed if elapsed else 0.0,
+                    elapsed,
+                    durable=0,
+                )
+                heartbeat = event.render()
+                logger.info("%s", heartbeat)
+                if echo:
+                    sys.stderr.write(f"{heartbeat}\n")
                     sys.stderr.flush()
-                    transcript_logger.debug("document_exporter output: %s", text.rstrip())
+                last_heartbeat = now
+    except BaseException:
+        if process.poll() is None:
+            _stop_child(process)
+        raise
+    finally:
+        reader.join(timeout=1.0)
+        process.stdout.close()
 
     final_chunk = redactor.feed(b"", final=True)
     if final_chunk:
         signals.observe(final_chunk)
         _bounded_tail(tail, final_chunk)
         if echo:
-            text = decoder.decode(final_chunk)
+            text = sanitize_text(decoder.decode(final_chunk))
             sys.stderr.write(text)
             transcript_logger.debug("document_exporter output: %s", text.rstrip())
     if echo:
         remainder = decoder.decode(b"", final=True)
         if remainder:
-            sys.stderr.write(remainder)
+            sys.stderr.write(sanitize_text(remainder))
         sys.stderr.flush()
 
     return _Completed(
@@ -242,6 +312,16 @@ def _run(
         path_too_long=signals.path_too_long,
         docker_unavailable=signals.docker_unavailable,
     )
+
+
+def _stop_child(process: subprocess.Popen[bytes]) -> None:
+    """Terminate a child, escalating to kill only when it does not exit."""
+    process.terminate()
+    try:
+        process.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait(timeout=5)
 
 
 def _failure(command: list[str], completed: _Completed, *, flat: bool = False) -> NoReturn:
@@ -269,6 +349,7 @@ def run_exporter(
     delete: bool = True,
     fallback_on_long_paths: bool = True,
     passphrase: str | None = None,
+    timeout_seconds: float = DEFAULT_EXPORT_TIMEOUT_SECONDS,
 ) -> ExporterRun:
     """Run `document_exporter`; on a path-length failure, retry flat once."""
     command = build_command(
@@ -279,7 +360,7 @@ def run_exporter(
         delete=delete,
         secure_passphrase=passphrase is not None,
     )
-    completed = _run(command, stdin_value=passphrase)
+    completed = _run(command, stdin_value=passphrase, timeout_seconds=timeout_seconds)
     if completed.returncode == 0:
         return ExporterRun(
             command,
@@ -302,7 +383,7 @@ def run_exporter(
             delete=delete,
             secure_passphrase=passphrase is not None,
         )
-        flat = _run(flat_command, stdin_value=passphrase)
+        flat = _run(flat_command, stdin_value=passphrase, timeout_seconds=timeout_seconds)
         if flat.returncode == 0:
             return ExporterRun(flat_command, used_filename_format=False, output=flat.output)
         _failure(flat_command, flat, flat=True)

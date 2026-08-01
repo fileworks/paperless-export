@@ -10,8 +10,11 @@ from __future__ import annotations
 
 import json
 import re
+import sqlite3
+import tempfile
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
@@ -54,26 +57,94 @@ class ExportedDocument(BaseModel):
         return sorted(years)
 
 
-def _names_by_pk(entries: list[dict[str, Any]], model: str) -> dict[int, str]:
-    names: dict[int, str] = {}
-    for entry in entries:
-        if entry.get("model") != model:
-            continue
-        try:
-            names[int(entry["pk"])] = str(entry["fields"]["name"])
-        except (KeyError, TypeError, ValueError) as exc:
-            raise OutputError(f"manifest.json has a malformed {model} entry.") from exc
+def _optional_name(
+    connection: sqlite3.Connection,
+    model: str,
+    value: object,
+) -> str | None:
+    if not isinstance(value, int):
+        return None
+    row = connection.execute(
+        "SELECT name FROM names WHERE model = ? AND pk = ?",
+        (model, value),
+    ).fetchone()
+    return None if row is None else str(row[0])
+
+
+def _tag_names(connection: sqlite3.Connection, value: object) -> list[str]:
+    if not isinstance(value, list):
+        raise TypeError
+    names: list[str] = []
+    for item in value:
+        name = _optional_name(connection, "documents.tag", item)
+        if name is not None:
+            names.append(name)
     return names
 
 
-def _optional_name(names: dict[int, str], value: object) -> str | None:
-    return names.get(value) if isinstance(value, int) else None
-
-
-def _tag_names(tags: dict[int, str], value: object) -> list[str]:
-    if not isinstance(value, list):
-        raise TypeError
-    return [tags[item] for item in value if isinstance(item, int) and item in tags]
+def _iter_json_array(path: Path, *, chunk_size: int = 1024 * 1024) -> Iterator[dict[str, Any]]:
+    """Incrementally decode a top-level JSON array with bounded input buffering."""
+    decoder = json.JSONDecoder()
+    try:
+        stream = path.open(encoding="utf-8")
+    except OSError as exc:
+        raise OutputError(f"{path} is not valid JSON: {exc}") from exc
+    with stream:
+        buffer = ""
+        position = 0
+        eof = False
+        started = False
+        expect_value = True
+        while True:
+            if position:
+                buffer = buffer[position:]
+                position = 0
+            while not eof and len(buffer) < chunk_size:
+                chunk = stream.read(chunk_size)
+                if chunk:
+                    buffer += chunk
+                else:
+                    eof = True
+            stripped = len(buffer) - len(buffer.lstrip())
+            position += stripped
+            if not started:
+                if position >= len(buffer) or buffer[position] != "[":
+                    raise OutputError(f"{path} is not valid JSON: expected a top-level array.")
+                position += 1
+                started = True
+                continue
+            while position < len(buffer) and buffer[position].isspace():
+                position += 1
+            if position < len(buffer) and buffer[position] == "]":
+                position += 1
+                if buffer[position:].strip() or stream.read(1):
+                    raise OutputError("manifest.json has trailing data after its JSON array.")
+                return
+            if not expect_value:
+                if position >= len(buffer):
+                    if eof:
+                        raise OutputError(f"{path} is not valid JSON: truncated array.")
+                    continue
+                if buffer[position] != ",":
+                    raise OutputError(f"{path} is not valid JSON: expected ',' between entries.")
+                position += 1
+                expect_value = True
+                continue
+            try:
+                value, position = decoder.raw_decode(buffer, position)
+            except json.JSONDecodeError as exc:
+                if not eof:
+                    chunk = stream.read(chunk_size)
+                    if chunk:
+                        buffer += chunk
+                        continue
+                    eof = True
+                    continue
+                raise OutputError(f"{path} is not valid JSON: {exc}") from exc
+            if not isinstance(value, dict):
+                raise OutputError("manifest.json must contain a JSON array of objects.")
+            yield value
+            expect_value = False
 
 
 def load_documents(manifest_path: Path) -> list[ExportedDocument]:
@@ -85,69 +156,115 @@ def load_documents(manifest_path: Path) -> list[ExportedDocument]:
             "  --export-dir     is that same directory as THIS machine sees it\n"
             "Both must resolve to one folder. Otherwise, run the exporter first."
         )
-    try:
-        raw: object = json.loads(manifest_path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError) as exc:
-        raise OutputError(f"{manifest_path} is not valid JSON: {exc}") from exc
-    if not isinstance(raw, list) or not all(isinstance(entry, dict) for entry in raw):
-        raise OutputError("manifest.json must contain a JSON array of objects.")
-    entries = cast(list[dict[str, Any]], raw)
     root = ExportRoot.from_path(manifest_path.parent)
-
-    tags = _names_by_pk(entries, "documents.tag")
-    correspondents = _names_by_pk(entries, "documents.correspondent")
-    doc_types = _names_by_pk(entries, "documents.documenttype")
-
-    # Validate the complete manifest path set before returning a single
-    # document to mutation-capable callers.
-    confined: dict[int, tuple[ConfinedPath | None, ConfinedPath | None]] = {}
-    for index, entry in enumerate(entries):
-        if entry.get("model") != "documents.document":
-            continue
-        identifier: int | str
-        try:
-            identifier = int(entry["pk"])
-        except (KeyError, TypeError, ValueError):
-            identifier = f"at index {index}"
-
-        original_value = entry.get(EXPORTED_FILE_KEY)
-        original = (
-            root.confine(document_id=identifier, value=original_value, field="original")
-            if EXPORTED_FILE_KEY in entry
-            else None
+    with tempfile.NamedTemporaryFile(
+        prefix="paperless-manifest-",
+        suffix=".sqlite",
+        delete=False,
+    ) as handle:
+        index_path = Path(handle.name)
+    connection = sqlite3.connect(index_path)
+    try:
+        connection.executescript(
+            """
+            CREATE TABLE names (model TEXT NOT NULL, pk INTEGER NOT NULL, name TEXT NOT NULL,
+                                PRIMARY KEY (model, pk));
+            CREATE TABLE documents (ordinal INTEGER PRIMARY KEY, payload TEXT NOT NULL);
+            """
         )
-        archive_value = entry.get(EXPORTED_ARCHIVE_KEY)
-        archive = (
-            root.confine(document_id=identifier, value=archive_value, field="archive")
-            if EXPORTED_ARCHIVE_KEY in entry and archive_value is not None
-            else None
-        )
-        confined[index] = (original, archive)
-
-    documents: list[ExportedDocument] = []
-    for index, entry in enumerate(entries):
-        if entry.get("model") != "documents.document":
-            continue
-        original, archive = confined[index]
-        if original is None:
-            continue  # e.g. --data-only export: nothing on disk to link
-        try:
-            fields = entry["fields"]
-            if not isinstance(fields, dict):
-                raise TypeError
-            created_raw = str(fields.get("created") or "")
-            documents.append(
-                ExportedDocument(
-                    pk=entry["pk"],
-                    title=fields.get("title", ""),
-                    correspondent=_optional_name(correspondents, fields.get("correspondent")),
-                    document_type=_optional_name(doc_types, fields.get("document_type")),
-                    tags=_tag_names(tags, fields.get("tags", [])),
-                    created=created_raw[:10],
-                    original=original,
-                    archive=archive,
+        for index, entry in enumerate(_iter_json_array(manifest_path)):
+            model = entry.get("model")
+            if model in {
+                "documents.tag",
+                "documents.correspondent",
+                "documents.documenttype",
+            }:
+                try:
+                    connection.execute(
+                        "INSERT OR REPLACE INTO names(model, pk, name) VALUES (?, ?, ?)",
+                        (model, int(entry["pk"]), str(entry["fields"]["name"])),
+                    )
+                except (KeyError, TypeError, ValueError) as exc:
+                    raise OutputError(f"manifest.json has a malformed {model} entry.") from exc
+                continue
+            if model != "documents.document":
+                continue
+            try:
+                identifier: int | str = int(entry["pk"])
+            except (KeyError, TypeError, ValueError):
+                identifier = f"at index {index}"
+            if EXPORTED_FILE_KEY in entry:
+                root.confine(
+                    document_id=identifier,
+                    value=entry.get(EXPORTED_FILE_KEY),
+                    field="original",
                 )
+            if entry.get(EXPORTED_ARCHIVE_KEY) is not None:
+                root.confine(
+                    document_id=identifier,
+                    value=entry.get(EXPORTED_ARCHIVE_KEY),
+                    field="archive",
+                )
+            connection.execute(
+                "INSERT INTO documents(ordinal, payload) VALUES (?, ?)",
+                (index, json.dumps(entry, separators=(",", ":"))),
             )
-        except (KeyError, TypeError, ValidationError) as exc:
-            raise OutputError(f"manifest.json has a malformed document at index {index}.") from exc
-    return documents
+        connection.commit()
+
+        documents: list[ExportedDocument] = []
+        for index, payload in connection.execute(
+            "SELECT ordinal, payload FROM documents ORDER BY ordinal"
+        ):
+            entry = json.loads(str(payload))
+            original_value = entry.get(EXPORTED_FILE_KEY)
+            if EXPORTED_FILE_KEY not in entry:
+                continue
+            try:
+                identifier = int(entry["pk"])
+                original = root.confine(
+                    document_id=identifier,
+                    value=original_value,
+                    field="original",
+                )
+                archive_value = entry.get(EXPORTED_ARCHIVE_KEY)
+                archive = (
+                    root.confine(
+                        document_id=identifier,
+                        value=archive_value,
+                        field="archive",
+                    )
+                    if archive_value is not None
+                    else None
+                )
+                fields = entry["fields"]
+                if not isinstance(fields, dict):
+                    raise TypeError
+                created_raw = str(fields.get("created") or "")
+                documents.append(
+                    ExportedDocument(
+                        pk=identifier,
+                        title=fields.get("title", ""),
+                        correspondent=_optional_name(
+                            connection,
+                            "documents.correspondent",
+                            fields.get("correspondent"),
+                        ),
+                        document_type=_optional_name(
+                            connection,
+                            "documents.documenttype",
+                            fields.get("document_type"),
+                        ),
+                        tags=_tag_names(connection, fields.get("tags", [])),
+                        created=created_raw[:10],
+                        original=original,
+                        archive=archive,
+                    )
+                )
+            except (KeyError, TypeError, ValidationError) as exc:
+                raise OutputError(
+                    f"manifest.json has a malformed document at index {index}."
+                ) from exc
+        return documents
+    finally:
+        connection.close()
+        index_path.unlink(missing_ok=True)

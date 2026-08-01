@@ -14,7 +14,8 @@ import typer
 
 from . import __version__
 from .errors import EXIT_UNEXPECTED, PaperlessExportError, PartialOutputError
-from .logging_config import configure_logging, register_secret
+from .logging_config import configure_logging, register_secret, sanitize_text
+from .progress import snapshot
 
 app = typer.Typer(add_completion=False, context_settings={"help_option_names": ["-h", "--help"]})
 
@@ -55,19 +56,26 @@ def _guarded[T](
         logging.getLogger(__name__).info("paperless-export completed successfully")
         return result
     except PaperlessExportError as exc:
+        safe_error = sanitize_text(str(exc))
         logging.getLogger(__name__).error(
-            "paperless-export failed exit_code=%s: %s", exc.exit_code, exc
+            "paperless-export failed exit_code=%s: %s", exc.exit_code, safe_error
         )
         if verbose:
-            traceback.print_exc()
-        typer.secho(str(exc), fg=typer.colors.RED, err=True)
+            safe_trace = sanitize_text("".join(traceback.format_exception(exc)))
+            logging.getLogger(__name__).error("Sanitized traceback:\n%s", safe_trace)
+        typer.secho(safe_error, fg=typer.colors.RED, err=True)
         raise typer.Exit(code=exc.exit_code) from exc
     except Exception as exc:
-        logging.getLogger(__name__).exception("paperless-export failed unexpectedly")
+        safe_error = sanitize_text(str(exc))
+        logging.getLogger(__name__).error(
+            "paperless-export failed unexpectedly: %s",
+            safe_error,
+        )
         if verbose:
-            traceback.print_exc()
+            safe_trace = sanitize_text("".join(traceback.format_exception(exc)))
+            logging.getLogger(__name__).error("Sanitized traceback:\n%s", safe_trace)
         typer.secho(
-            f"Unexpected error: {exc} (re-run with --verbose for the full traceback)",
+            f"Unexpected error: {safe_error} (re-run with --verbose for the full traceback)",
             fg=typer.colors.RED,
             err=True,
         )
@@ -162,12 +170,8 @@ class _ProgressReporter:
             return
         self._phase = phase
         self._last_emit = now
-        total_text = str(total) if total else "?"
-        message = (
-            f"Progress phase={phase} current={current} total={total_text} "
-            f"failures={failures} rate={rate:.1f}/s elapsed={elapsed:.1f}s"
-        )
-        logging.getLogger(__name__).info(message)
+        event = snapshot(phase, current, total, failures, rate, elapsed)
+        logging.getLogger(__name__).info(event.render())
 
 
 @app.command()
@@ -246,6 +250,15 @@ def run(
     token: Annotated[
         str, typer.Option("--token", envvar="PAPERLESS_TOKEN", help="Paperless API token.")
     ] = "",
+    exporter_timeout: Annotated[
+        float,
+        typer.Option(
+            "--exporter-timeout",
+            envvar="PAPERLESS_EXPORT_TIMEOUT_SECONDS",
+            min=1,
+            help="Stop a silent or stuck document_exporter after this many seconds.",
+        ),
+    ] = 6 * 60 * 60,
     log_file: Annotated[
         Path | None,
         typer.Option(
@@ -275,7 +288,7 @@ def run(
                 err=True,
             )
         exporter_progress = _ProgressReporter()
-        exporter_progress("native_exporter", 0, 0, 0, 0.0, 0.0)
+        exporter_progress("exporter", 0, 0, 0, 0.0, 0.0)
         result = run_exporter(
             exporter_cmd,
             exporter_target,
@@ -284,8 +297,9 @@ def run(
             delete=delete,
             fallback_on_long_paths=fallback,
             passphrase=passphrase,
+            timeout_seconds=exporter_timeout,
         )
-        exporter_progress("native_exporter", 1, 1, 0, 0.0, 0.0)
+        exporter_progress("exporter", 1, 1, 0, 0.0, 0.0)
         if not result.used_filename_format and filename_format:
             typer.secho(
                 "Note: fell back to a flat export (path too long) — see log above.",

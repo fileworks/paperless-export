@@ -22,8 +22,13 @@ def _cmd(script: Path) -> str:
 def _completed_run(
     completed: _Completed,
 ) -> object:
-    def run(_command: list[str], *, stdin_value: str | None = None) -> _Completed:
-        del stdin_value
+    def run(
+        _command: list[str],
+        *,
+        stdin_value: str | None = None,
+        timeout_seconds: float | None = None,
+    ) -> _Completed:
+        del stdin_value, timeout_seconds
         return completed
 
     return run
@@ -133,6 +138,13 @@ class TestRunExporter:
     def test_missing_binary_is_actionable(self) -> None:
         with pytest.raises(ServerUnreachableError, match="--exporter-cmd"):
             run_exporter("/does/not/exist-binary", "/export")
+
+    def test_silent_child_is_terminated_at_the_configured_timeout(self, tmp_path: Path) -> None:
+        script = tmp_path / "silent.py"
+        script.write_text("import time; time.sleep(30)\n", encoding="utf-8")
+
+        with pytest.raises(ExporterFailedError, match=r"configured 0\.1s timeout"):
+            run_exporter(_cmd(script), "/export", timeout_seconds=0.1)
 
 
 class TestLiveOutput:

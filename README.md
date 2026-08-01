@@ -34,8 +34,8 @@ export/
 
 ## Status
 
-Released **1.0.0** — verified on PyPI, as a GitHub Release, and through
-`fileworks/tap` on 2026-07-26. Development after that tag is unreleased
+Released **1.1.0** — verified on PyPI, as a GitHub Release, and through
+`fileworks/tap` on 2026-08-01. Development after that tag is unreleased
 until the release workflow runs.
 
 ## Overview
@@ -56,9 +56,9 @@ pipx install paperless-export          # + 'paperless-export[pdf]' for --embed-t
 brew install fileworks/tap/paperless-export
 ```
 
-Version `1.0.0` is published on
-[PyPI](https://pypi.org/project/paperless-export/1.0.0/), as a
-[GitHub Release](https://github.com/fileworks/paperless-export/releases/tag/v1.0.0),
+Version `1.1.0` is published on
+[PyPI](https://pypi.org/project/paperless-export/1.1.0/), as a
+[GitHub Release](https://github.com/fileworks/paperless-export/releases/tag/v1.1.0),
 and through `fileworks/tap`. Development after that tag remains unreleased
 until the normal release workflow runs.
 
@@ -97,6 +97,9 @@ Notes:
 - `PAPERLESS_EXPORT_LOG_FILE` is the environment alias for `--log-file`.
   Without it, a bounded rotating `paperless-export.log` is written beside the
   export directory for unattended-job diagnostics.
+- `PAPERLESS_EXPORT_TIMEOUT_SECONDS` is the environment alias for
+  `--exporter-timeout`. The reviewed default is six hours; expiry terminates the
+  child cleanly, then force-kills only if it will not exit.
 - Passphrase transport is supported for the default
   `docker compose exec -T webserver document_exporter` adapter. A custom
   exporter command is rejected when a passphrase is configured unless this
@@ -192,13 +195,15 @@ runs.
 | `--copy` | Use verified copies in `_Steuer` instead of symlinks |
 | `--no-tax-view` | Skip building `_Steuer` |
 | `--log-file` | Bounded rotating logfile path |
+| `--exporter-timeout` | Stop a stuck child after 21600 seconds by default |
 
 `--help` is authoritative.
 
 ## Troubleshooting
 
-**The export appears to hang.** It does not — `document_exporter` used to buffer
-its output. Progress is now streamed; a long silence means a genuinely long step.
+**The export appears to hang.** Child output is streamed and a five-second
+heartbeat reaches both the terminal and rotating logfile during silent work.
+The configured exporter timeout stops a genuinely stuck child.
 
 **Exit code 4, 5, or 6.** Four means exported output is missing, unsafe, or
 cannot be published; five means non-fatal requested post-processing (currently
