@@ -1,6 +1,60 @@
 # CHANGELOG
 
 
+## v1.2.1 (2026-08-01)
+
+### Bug Fixes
+
+- Automate downstream projection checks
+  ([#13](https://github.com/fileworks/paperless-export/pull/13),
+  [`10583cf`](https://github.com/fileworks/paperless-export/commit/10583cff851206dc96479dfe15cba7aa38f4856c))
+
+- Preserve dependency merge release triggers
+  ([#17](https://github.com/fileworks/paperless-export/pull/17),
+  [`aeffe37`](https://github.com/fileworks/paperless-export/commit/aeffe373c5a2b38c3983bdb5b62f0db7c8c6df69))
+
+* fix: preserve dependency merge release triggers
+
+* fix: schedule trusted dependency merges
+
+### Chores
+
+- **deps**: Bump actions/checkout from 5 to 7
+  ([#14](https://github.com/fileworks/paperless-export/pull/14),
+  [`8ddf199`](https://github.com/fileworks/paperless-export/commit/8ddf199df2a98deb085f798c54c2b98048e2874a))
+
+Bumps [actions/checkout](https://github.com/actions/checkout) from 5 to 7. - [Release
+  notes](https://github.com/actions/checkout/releases) -
+  [Changelog](https://github.com/actions/checkout/blob/main/CHANGELOG.md) -
+  [Commits](https://github.com/actions/checkout/compare/v5...v7)
+
+--- updated-dependencies: - dependency-name: actions/checkout dependency-version: '7'
+
+dependency-type: direct:production
+
+update-type: version-update:semver-major ...
+
+Signed-off-by: dependabot[bot] <support@github.com>
+
+Co-authored-by: dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com>
+
+### Continuous Integration
+
+- Separate release publication environments
+  ([#12](https://github.com/fileworks/paperless-export/pull/12),
+  [`72db82e`](https://github.com/fileworks/paperless-export/commit/72db82e1388dabdf02e0be67840e6f0ae0981c3c))
+
+### Documentation
+
+- Record v1.2.0 channels and deduplicate CI
+  ([#11](https://github.com/fileworks/paperless-export/pull/11),
+  [`4e12d77`](https://github.com/fileworks/paperless-export/commit/4e12d77d71a99eeec47f65edbcd4c3b46cae9703))
+
+* docs: record v1.2.0 release channels
+
+* ci: avoid duplicate pull request runs
+
+
 ## v1.2.0 (2026-08-01)
 
 ### Features
