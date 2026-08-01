@@ -1,6 +1,15 @@
 # CHANGELOG
 
 
+## v1.2.0 (2026-08-01)
+
+### Features
+
+- Stream manifests and supervise exporter runs
+  ([#10](https://github.com/fileworks/paperless-export/pull/10),
+  [`55f5c1d`](https://github.com/fileworks/paperless-export/commit/55f5c1dd3e57b3b281fd6b4b484dbc245f93d0ab))
+
+
 ## v1.1.0 (2026-07-30)
 
 ### Features
