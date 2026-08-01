@@ -133,6 +133,19 @@ def test_release_verifies_before_every_publication_and_dispatch() -> None:
     assert "vcs_release: false" in workflow
 
 
+def test_release_channels_use_explicit_protected_environments() -> None:
+    workflow = Path(".github/workflows/release.yml").read_text()
+
+    assert "environment: github-release" in workflow
+    assert "environment: pypi" in workflow
+    assert "environment: homebrew" in workflow
+    assert "name: python-distributions" in workflow
+    assert "actions/upload-artifact@v7" in workflow
+    assert workflow.count("actions/download-artifact@v8") == 2
+    assert workflow.index("environment: github-release") < workflow.index("environment: pypi")
+    assert workflow.index("environment: pypi") < workflow.index("environment: homebrew")
+
+
 def test_locked_ci_and_existing_reviewed_actions_are_preserved() -> None:
     ci = Path(".github/workflows/ci.yml").read_text()
     release = Path(".github/workflows/release.yml").read_text()
