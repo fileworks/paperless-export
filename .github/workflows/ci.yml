@@ -21,6 +21,9 @@ jobs:
       - run: uv lock --check
       - run: uv sync --locked --all-extras --dev
 
+      - name: Install independent PDF metadata consumer
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends poppler-utils
+
       - name: lint
         run: |
           uv run ruff check .
@@ -53,6 +56,18 @@ jobs:
           tests/test_taxview.py
           tests/test_security.py
           tests/test_cli.py
+
+  synology-contract:
+    name: Synology DSM scheduled-job contract
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9
+      - run: uv sync --locked --all-extras --dev
+      - name: Reject Bash-only syntax with Ubuntu's POSIX shell
+        run: dash -n scripts/synology-task.sh
+      - name: Run the DSM scheduler and permissions contract
+        run: uv run pytest -q tests/test_synology_task.py
 
   docs-links:
     name: docs-links
