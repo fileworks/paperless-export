@@ -49,6 +49,51 @@ class TestLoadDocuments:
         with pytest.raises(OutputError, match="not valid JSON"):
             load_documents(bad)
 
+    def test_truncated_array_fails_closed(self, tmp_path: Path) -> None:
+        bad = tmp_path / "manifest.json"
+        bad.write_text('[{"model":"documents.document"', encoding="utf-8")
+
+        with pytest.raises(OutputError, match="not valid JSON"):
+            load_documents(bad)
+
+    def test_non_object_array_entry_is_rejected(self, tmp_path: Path) -> None:
+        bad = tmp_path / "manifest.json"
+        bad.write_text("[1]", encoding="utf-8")
+
+        with pytest.raises(OutputError, match="array of objects"):
+            load_documents(bad)
+
+    def test_reordered_high_cardinality_names_use_the_external_index(self, tmp_path: Path) -> None:
+        original = tmp_path / "documents" / "originals" / "one.pdf"
+        original.parent.mkdir(parents=True)
+        original.write_bytes(b"%PDF")
+        entries = [
+            {
+                "model": "documents.document",
+                "pk": 1,
+                "fields": {
+                    "title": "one",
+                    "tags": [1999],
+                    "correspondent": None,
+                    "document_type": None,
+                },
+                "__exported_file_name__": "documents/originals/one.pdf",
+            },
+            *[
+                {
+                    "model": "documents.tag",
+                    "pk": index,
+                    "fields": {"name": f"tag-{index}"},
+                }
+                for index in range(2000)
+            ],
+        ]
+        (tmp_path / "manifest.json").write_text(json.dumps(entries), encoding="utf-8")
+
+        documents = load_documents(tmp_path / "manifest.json")
+
+        assert documents[0].tags == ["tag-1999"]
+
 
 class TestTaxYears:
     def test_extracts_years_from_tags(self, export_dir: Path) -> None:
