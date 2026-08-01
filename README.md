@@ -34,7 +34,7 @@ export/
 
 ## Status
 
-Released **1.1.0** — verified on PyPI, as a GitHub Release, and through
+Released **1.2.0** — verified on PyPI, as a GitHub Release, and through
 `fileworks/tap` on 2026-08-01. Development after that tag is unreleased
 until the release workflow runs.
 
@@ -56,9 +56,9 @@ pipx install paperless-export          # + 'paperless-export[pdf]' for --embed-t
 brew install fileworks/tap/paperless-export
 ```
 
-Version `1.1.0` is published on
-[PyPI](https://pypi.org/project/paperless-export/1.1.0/), as a
-[GitHub Release](https://github.com/fileworks/paperless-export/releases/tag/v1.1.0),
+Version `1.2.0` is published on
+[PyPI](https://pypi.org/project/paperless-export/1.2.0/), as a
+[GitHub Release](https://github.com/fileworks/paperless-export/releases/tag/v1.2.0),
 and through `fileworks/tap`. Development after that tag remains unreleased
 until the normal release workflow runs.
 
