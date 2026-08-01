@@ -174,13 +174,20 @@ post-processing.
 
 ## Scheduling on a Synology (DSM Task Scheduler)
 
+Use the checked-in POSIX/BusyBox-compatible wrapper so Task Scheduler does not
+depend on an interactive shell profile:
+
 ```sh
-cd /volume1/docker/paperless && \
-/usr/local/bin/paperless-export run --export-dir /volume1/paperless/export
+PAPERLESS_COMPOSE_DIR=/volume1/docker/paperless \
+PAPERLESS_EXPORT_DIR=/volume1/paperless/export \
+/bin/sh /volume1/docker/paperless-export/scripts/synology-task.sh
 ```
 
 Nightly, after the Paperless backup window; the export target should live on a
-share covered by your backup chain.
+share covered by your backup chain. Run the task as a dedicated account that can
+read the Compose project and write only the export directory. The wrapper sets
+`umask 077`, validates absolute/readable locations before launch, and is syntax-
+checked with a strict POSIX shell in CI.
 
 ## Configuration
 
