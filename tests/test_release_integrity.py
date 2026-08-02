@@ -128,7 +128,7 @@ def test_release_verifies_before_every_publication_and_dispatch() -> None:
     pypi = workflow.index("pypa/gh-action-pypi-publish@release/v1")
     brew = workflow.index("gh workflow run bump.yml")
     assert preflight < build < verify < push < github_release < pypi < brew
-    assert "root_options: --noop" in workflow
+    assert "no_operation_mode: true" in workflow
     assert "push: false" in workflow
     assert "vcs_release: false" in workflow
 
@@ -152,9 +152,11 @@ def test_locked_ci_and_existing_reviewed_actions_are_preserved() -> None:
     assert "uv lock --check" in ci
     assert "uv sync --locked --all-extras --dev" in ci
     assert "actions/checkout@v7" in ci + release
-    assert "python-semantic-release/python-semantic-release@v9" in release
+    assert "python-semantic-release/python-semantic-release@v10" in release
+    assert "no_operation_mode: true" in release
+    assert "root_options:" not in release
+    assert "GH_REPO: ${{ github.repository }}" in release
     assert "astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9" in ci
-    assert "@v10" not in release
 
 
 def test_installed_wheel_smoke_includes_pdf_extra_and_cli() -> None:

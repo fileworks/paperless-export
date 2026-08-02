@@ -48,10 +48,10 @@ jobs:
 
       - name: Plan semantic release without side effects
         id: plan
-        uses: python-semantic-release/python-semantic-release@v9
+        uses: python-semantic-release/python-semantic-release@v10
         with:
           github_token: ${{ secrets.SEMANTIC_RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
-          root_options: --noop
+          no_operation_mode: true
           build: false
 
       - name: Prove the selected version is new
@@ -73,7 +73,7 @@ jobs:
       - name: Build and stage semantic release locally
         if: steps.plan.outputs.released == 'true'
         id: semrel
-        uses: python-semantic-release/python-semantic-release@v9
+        uses: python-semantic-release/python-semantic-release@v10
         with:
           github_token: ${{ secrets.SEMANTIC_RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
           push: false
@@ -140,6 +140,7 @@ jobs:
       - name: Create GitHub Release with verified distributions
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
           RELEASE_TAG: ${{ needs.release-integrity.outputs.tag }}
         run: >-
           gh release create "$RELEASE_TAG"
