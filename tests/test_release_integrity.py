@@ -155,6 +155,7 @@ def test_locked_ci_and_existing_reviewed_actions_are_preserved() -> None:
     assert "python-semantic-release/python-semantic-release@v10" in release
     assert "no_operation_mode: true" in release
     assert "root_options:" not in release
+    assert "GH_REPO: ${{ github.repository }}" in release
     assert "astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9" in ci
 
 
