@@ -62,6 +62,16 @@ Version `1.2.0` is published on
 and through `fileworks/tap`. Development after that tag remains unreleased
 until the normal release workflow runs.
 
+## Quick start
+
+```sh
+# from the directory holding your Paperless compose file
+paperless-export run --export-dir ~/paperless-export
+```
+
+The first run performs a full export. Later runs reuse what is already there and
+rebuild only what changed.
+
 ## Usage
 
 ```sh
@@ -109,16 +119,6 @@ Notes:
   copies, so copy mode receives the updated bytes. Rewrites change checksums,
   so Paperless can re-export those files on the next
   `--compare-checksums` run.
-
-## Quick start
-
-```sh
-# from the directory holding your Paperless compose file
-paperless-export run --export-dir ~/paperless-export
-```
-
-The first run performs a full export. Later runs reuse what is already there and
-rebuild only what changed.
 
 ## Passphrase and export security
 
@@ -228,12 +228,11 @@ from copies.
 ## Development
 
 ```sh
-uv lock --check
-uv sync --locked --all-extras --dev
+uv sync --locked --all-extras --all-groups
 uv run ruff check . && uv run ruff format --check .   # lint
 uv run mypy                                           # strict types
 uv run pytest                                         # tests
-uv build
+uv build                                              # sdist + wheel
 ```
 
 Conventional Commits drive releases (`python-semantic-release`): merge to
@@ -248,6 +247,14 @@ history and policy enforcement.
 For per-clone paths, commands, or preferences, create an ignored
 `CLAUDE.local.md` at the repository root. Do not put credentials or other
 secrets in it.
+
+## Security
+
+Report vulnerabilities privately as described in [SECURITY.md](SECURITY.md).
+Registered secrets — the Paperless token and the passphrase — are redacted from
+the logfile and from captured exporter output, including values split across
+chunk boundaries. A passphrase is accepted only from a protected file or
+standard input, never from `argv` or the environment.
 
 ## License
 
