@@ -217,13 +217,18 @@ def _materialize(
     use_copy = copy
     total = sum(len(years) for _doc, years, _source in selected)
     completed = 0
-    for doc, years, source in selected:
+    for doc, _preflight_source, years in ((d, s, y) for d, y, s in selected):
+        # Re-checked once per document rather than rebound inside the year loop:
+        # the loop variable used to be reassigned mid-body, so the first year's
+        # link name was derived from the preflight path and every later year's
+        # from the re-checked one. They agree today, which is exactly what made
+        # it easy to miss.
+        source = doc.original.regular_file() or _missing_during_build(doc.file_path)
         for year in years:
             year_dir = publication.staging / year
             year_dir.mkdir(parents=True, exist_ok=True)
             link_name = _unique_name(year_dir, source.name, doc.pk)
             destination = year_dir / link_name
-            source = doc.original.regular_file() or _missing_during_build(doc.file_path)
             try:
                 if use_copy:
                     _copy_verified(source, destination)
@@ -355,7 +360,7 @@ def _read_journal(root: Path, journal: Path) -> tuple[_Publication, PublicationP
         ) from exc
     return (
         _Publication(run_id, staging, previous, target, journal),
-        cast(PublicationPhase, phase),
+        cast("PublicationPhase", phase),
     )
 
 

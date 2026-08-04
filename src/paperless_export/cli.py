@@ -13,7 +13,8 @@ from typing import Annotated
 import typer
 
 from . import __version__
-from .errors import EXIT_UNEXPECTED, PaperlessExportError, PartialOutputError
+from .errors import PaperlessExportError, PartialOutputError
+from .exit_codes import ExitCode
 from .logging_config import configure_logging, register_secret, sanitize_text
 from .progress import snapshot
 
@@ -55,6 +56,9 @@ def _guarded[T](
         result = action()
         logging.getLogger(__name__).info("paperless-export completed successfully")
         return result
+    except KeyboardInterrupt as exc:
+        typer.secho("Interrupted; nothing was left half-written.", fg=typer.colors.YELLOW, err=True)
+        raise typer.Exit(code=ExitCode.INTERRUPTED) from exc
     except PaperlessExportError as exc:
         safe_error = sanitize_text(str(exc))
         logging.getLogger(__name__).error(
@@ -79,7 +83,7 @@ def _guarded[T](
             fg=typer.colors.RED,
             err=True,
         )
-        raise typer.Exit(code=EXIT_UNEXPECTED) from exc
+        raise typer.Exit(code=ExitCode.FATAL) from exc
 
 
 def _post_process(

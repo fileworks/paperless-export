@@ -162,15 +162,19 @@ post-processing.
 
 ## Exit codes
 
-| Code | Meaning |
-|---|---|
-| 0 | complete requested output, including successful advisory fallbacks |
-| 1 | unexpected wrapper failure |
-| 2 | bad configuration / authentication failure |
-| 3 | Paperless API or Docker/Compose/service/container unavailable |
-| 4 | malformed, unsafe, missing, or fatally unwritable export output |
-| 5 | exporter succeeded but requested post-processing is incomplete |
-| 6 | `document_exporter` ran but failed (its child code remains in diagnostics) |
+The same codes mean the same thing in `immich-export`, `paperless-export` and
+`unpacksort`, so one script can drive all three.
+
+| Code | Name | Meaning |
+|---|---|---|
+| 0 | `SUCCESS` | everything asked for was done |
+| 1 | `PARTIAL` | the exporter succeeded but requested post-processing is incomplete |
+| 2 | `USAGE` | bad flags, paths, or credentials the server rejected — nothing was attempted |
+| 3 | `CONFLICT` | the Paperless API, or its Docker/Compose service or container, is unavailable |
+| 4 | `FATAL` | unexpected failure, or output that could not be written (re-run with `--verbose`) |
+| 130 | `INTERRUPTED` | cancelled by the operator |
+
+`document_exporter`'s own child code stays in the diagnostics line.
 
 ## Scheduling on a Synology (DSM Task Scheduler)
 

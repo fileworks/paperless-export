@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from paperless_export.errors import ExporterFailedError, ServerUnreachableError
+from paperless_export.exit_codes import ExitCode
 from paperless_export.exporter import (
     DIAGNOSTIC_TAIL_BYTES,
     _Completed,
@@ -79,7 +80,7 @@ class TestRunExporter:
         script.write_text("import sys; sys.stderr.write('database is locked'); sys.exit(5)\n")
         with pytest.raises(ExporterFailedError, match="database is locked") as excinfo:
             run_exporter(_cmd(script), "/export")
-        assert excinfo.value.exit_code == 6
+        assert excinfo.value.exit_code == ExitCode.FATAL
         assert excinfo.value.child_code == 5
 
     def test_path_too_long_falls_back_to_flat(self, tmp_path: Path) -> None:
@@ -202,7 +203,7 @@ class TestDockerClassification:
             )
             with pytest.raises(ServerUnreachableError) as excinfo:
                 run_exporter()
-            assert excinfo.value.exit_code == 3
+            assert excinfo.value.exit_code == ExitCode.CONFLICT
 
     def test_paperless_failure_in_reachable_container_is_exporter_failure(
         self, monkeypatch: pytest.MonkeyPatch
@@ -214,5 +215,5 @@ class TestDockerClassification:
         )
         with pytest.raises(ExporterFailedError) as excinfo:
             run_exporter()
-        assert excinfo.value.exit_code == 6
+        assert excinfo.value.exit_code == ExitCode.FATAL
         assert excinfo.value.child_code == 2

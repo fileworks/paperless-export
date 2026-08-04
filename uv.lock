@@ -412,11 +412,11 @@ provides-extras = ["pdf"]
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "mypy", specifier = ">=1.13" },
-    { name = "pikepdf", specifier = ">=9.0" },
-    { name = "pytest", specifier = ">=8.3" },
-    { name = "respx", specifier = ">=0.22" },
-    { name = "ruff", specifier = ">=0.8" },
+    { name = "mypy", specifier = "==2.3.0" },
+    { name = "pikepdf", specifier = "==10.10.0" },
+    { name = "pytest", specifier = "==9.1.1" },
+    { name = "respx", specifier = "==0.23.1" },
+    { name = "ruff", specifier = "==0.16.0" },
 ]
 
 [[package]]

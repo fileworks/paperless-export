@@ -69,7 +69,7 @@ def snapshot(
     if total is not None and current >= 5 and rate > 0 and current <= total:
         eta = (total - current) / rate
     return ProgressEvent(
-        phase=cast(ProgressPhase, phase),
+        phase=cast("ProgressPhase", phase),
         current=max(0, current),
         total=None if not total else max(0, total),
         durable=max(0, current - failures if durable is None else durable),
