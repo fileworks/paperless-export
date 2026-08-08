@@ -13,7 +13,7 @@ from typing import Annotated
 import typer
 
 from . import __version__
-from .errors import PaperlessExportError, PartialOutputError
+from .errors import OutputPathError, PaperlessExportError, PartialOutputError
 from .exit_codes import ExitCode
 from .logging_config import configure_logging, register_secret, sanitize_text
 from .progress import snapshot
@@ -84,6 +84,61 @@ def _guarded[T](
             err=True,
         )
         raise typer.Exit(code=ExitCode.FATAL) from exc
+
+
+def _checked[T](action: Callable[[], T]) -> T:
+    """Run an invocation-time check before anything is set up or written.
+
+    Deliberately outside `_guarded`: `_guarded` opens a logfile beside the export
+    directory, and that directory is exactly what is under suspicion here. A
+    usage error has to be reportable without having written anything anywhere,
+    which is the same property `USAGE` claims — nothing was attempted.
+    """
+    try:
+        return action()
+    except PaperlessExportError as exc:
+        typer.secho(sanitize_text(str(exc)), fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=exc.exit_code) from exc
+
+
+def _require_export_dir(export_dir: Path) -> None:
+    """`tax-view` rebuilds the views of an export it did not produce.
+
+    So the directory has to be there already. Saying so up front beats failing
+    later on a missing `manifest.json`, which reads as a broken export rather
+    than as a mistyped flag.
+    """
+    if export_dir.is_dir():
+        return
+    detail = "is not a directory" if export_dir.exists() else "does not exist"
+    raise OutputPathError(
+        f"--export-dir {export_dir} {detail}. `tax-view` rebuilds the views of an "
+        "existing export: run `paperless-export run` first, or point --export-dir at "
+        "the directory document_exporter wrote."
+    )
+
+
+def _prepare_export_dir(export_dir: Path) -> None:
+    """`run` produces the export, so it may create the directory it writes into.
+
+    Only the leaf, and only when the parent is already there. Creating an
+    arbitrary depth would turn one mistyped path into a new directory tree that
+    then looks like a successful export — and the parent has to exist anyway,
+    because that is where the logfile goes.
+    """
+    if export_dir.is_dir():
+        return
+    if export_dir.exists():
+        raise OutputPathError(f"--export-dir {export_dir} is not a directory.")
+    if not export_dir.parent.is_dir():
+        raise OutputPathError(
+            f"--export-dir {export_dir} cannot be created because {export_dir.parent} "
+            "does not exist. Create the parent directory, or correct the path."
+        )
+    try:
+        export_dir.mkdir()
+    except OSError as exc:
+        raise OutputPathError(f"--export-dir {export_dir} could not be created: {exc}") from exc
 
 
 def _post_process(
@@ -320,6 +375,7 @@ def run(
                 tax_view=tax_view,
             )
 
+    _checked(lambda: _prepare_export_dir(export_dir))
     _guarded(
         verbose,
         action,
@@ -356,6 +412,7 @@ def tax_view_cmd(
     verbose: Annotated[bool, typer.Option("--verbose", "-v")] = False,
 ) -> None:
     """Rebuild only the _Steuer/YYYY view from an existing export (no exporter run)."""
+    _checked(lambda: _require_export_dir(export_dir))
     _guarded(
         verbose,
         lambda: _post_process(

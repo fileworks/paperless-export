@@ -30,13 +30,36 @@ class ServerUnreachableError(PaperlessExportError):
 
 
 class OutputError(PaperlessExportError):
-    """Export directory unwritable or missing."""
+    """Writing the export failed after work had already begun.
+
+    The line between this and `OutputPathError` is the one the exit-code table
+    already draws: *was anything attempted?* A write that fails part-way leaves
+    output on disk in a state neither the tool nor the operator can characterise,
+    which is what `FATAL` means. A path that was already wrong when the command
+    was typed is a different condition and gets a different code.
+    """
 
     exit_code = ExitCode.FATAL
 
 
+class OutputPathError(ConfigError):
+    """A path given on the command line is missing or malformed. Nothing ran.
+
+    A `ConfigError` by construction, not by coincidence: "invalid flags, missing
+    paths" is that class's whole definition, and a script asking "did I type the
+    wrong path, or did something break?" needs the two to answer differently.
+    Reported before any logging is configured, because the directory under
+    suspicion is usually where the logfile would go.
+    """
+
+
 class UnsafeOutputError(OutputError):
-    """Manifest-derived or generated output escaped the export boundary."""
+    """Manifest-derived or generated output escaped the export boundary.
+
+    Stays on the fatal branch deliberately. A manifest path that climbs out of
+    the export root is not somebody mistyping a flag — it is the export
+    contradicting itself, mid-run, about where its own files live.
+    """
 
 
 class PartialOutputError(PaperlessExportError):

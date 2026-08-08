@@ -34,8 +34,8 @@ export/
 
 ## Status
 
-Released **1.2.0** — verified on PyPI, as a GitHub Release, and through
-`fileworks/tap` on 2026-08-01. Development after that tag is unreleased
+Released **1.2.2** — verified on PyPI, as a GitHub Release, and through
+`fileworks/tap` on 2026-08-04. Development after that tag is unreleased
 until the release workflow runs.
 
 ## Overview
@@ -56,9 +56,9 @@ pipx install paperless-export          # + 'paperless-export[pdf]' for --embed-t
 brew install fileworks/tap/paperless-export
 ```
 
-Version `1.2.0` is published on
-[PyPI](https://pypi.org/project/paperless-export/1.2.0/), as a
-[GitHub Release](https://github.com/fileworks/paperless-export/releases/tag/v1.2.0),
+Version `1.2.2` is published on
+[PyPI](https://pypi.org/project/paperless-export/1.2.2/), as a
+[GitHub Release](https://github.com/fileworks/paperless-export/releases/tag/v1.2.2),
 and through `fileworks/tap`. Development after that tag remains unreleased
 until the normal release workflow runs.
 
@@ -171,10 +171,15 @@ this tool's, and the table below is what it means here.
 |---|---|---|
 | 0 | `SUCCESS` | everything asked for was done |
 | 1 | `PARTIAL` | the exporter succeeded but requested post-processing is incomplete |
-| 2 | `USAGE` | bad flags, paths, or credentials the server rejected — nothing was attempted |
+| 2 | `USAGE` | bad flags, a path that is missing or malformed, or credentials the server rejected — nothing was attempted |
 | 3 | `CONFLICT` | the Paperless API, or its Docker/Compose service or container, is unavailable |
-| 4 | `FATAL` | unexpected failure, or output that could not be written (re-run with `--verbose`) |
+| 4 | `FATAL` | unexpected failure, or a write that failed after work had begun (re-run with `--verbose`) |
 | 130 | `INTERRUPTED` | cancelled by the operator |
+
+The line between `2` and `4` is **was anything attempted**. A `--export-dir` that
+is missing when you type the command is `2` in every tool: nothing ran, and
+nothing was written. A write that fails part-way through leaves the export in a
+state nobody can characterise, and that is `4`.
 
 `document_exporter`'s own child code stays in the diagnostics line.
 
@@ -218,11 +223,19 @@ runs.
 heartbeat reaches both the terminal and rotating logfile during silent work.
 The configured exporter timeout stops a genuinely stuck child.
 
-**Exit code 4, 5, or 6.** Four means exported output is missing, unsafe, or
-cannot be published; five means non-fatal requested post-processing (currently
-PDF metadata embedding) is incomplete; six means `document_exporter` itself
-failed. All three leave Paperless originals untouched, and tax-view publication
-failures retain the previous complete `_Steuer`.
+**Exit code 2 for a directory you expected to work.** `tax-view` rebuilds the
+views of an export it did not produce, so `--export-dir` has to exist already;
+run `paperless-export run` first. `run` will create the directory itself, but
+only its last segment, and only when the parent is already there — so a mistyped
+path fails loudly instead of quietly becoming a new empty tree.
+
+**Exit code 1 or 4.** One means `document_exporter` succeeded but requested
+post-processing (PDF metadata embedding, the `_Steuer` view) is incomplete; the
+report names each part that is missing. Four means an unexpected failure, or
+output that could not be written once the run was under way — including a
+manifest path pointing outside the export root. Both leave Paperless originals
+untouched, and a failed tax-view publication retains the previous complete
+`_Steuer`.
 
 **Symlinks fail on the target.** Use `--copy`; the tax view is then built
 from copies.
