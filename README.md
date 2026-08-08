@@ -23,6 +23,9 @@ fields). This tool deliberately does **not** rebuild any of that. It:
 4. publishes the derived view only after every required source and staged output
    validates; a failed replacement leaves the prior complete `_Steuer` current.
 
+This is a readable escape copy, not a replacement for tested backups of
+Paperless and its database.
+
 ```
 export/
   Bescheid/Finanzamt/2024-05-01 Steuerbescheid.pdf   # ← document_exporter
@@ -32,22 +35,6 @@ export/
     INDEX.csv                                         # year,title,correspondent,created,original_path
 ```
 
-## Status
-
-Released **1.2.2** — verified on PyPI, as a GitHub Release, and through
-`fileworks/tap` on 2026-08-04. Development after that tag is unreleased
-until the release workflow runs.
-
-## Overview
-
-`paperless-export` wraps Paperless-ngx's own `document_exporter` and adds what
-it leaves out: a scheduled, verified run, streamed progress instead of silence,
-and an optional tax view (`_Steuer`) built from your existing tags.
-
-It is an escape hatch, not a backup — it produces a readable copy of what
-Paperless holds, so that Paperless never becomes the only place your documents
-exist.
-
 ## Install
 
 ```sh
@@ -56,11 +43,10 @@ pipx install paperless-export          # + 'paperless-export[pdf]' for --embed-t
 brew install fileworks/tap/paperless-export
 ```
 
-Version `1.2.2` is published on
-[PyPI](https://pypi.org/project/paperless-export/1.2.2/), as a
-[GitHub Release](https://github.com/fileworks/paperless-export/releases/tag/v1.2.2),
-and through `fileworks/tap`. Development after that tag remains unreleased
-until the normal release workflow runs.
+Released **1.2.2** on
+[PyPI](https://pypi.org/project/paperless-export/1.2.2/),
+[GitHub](https://github.com/fileworks/paperless-export/releases/tag/v1.2.2), and
+`fileworks/tap` (verified 2026-08-04).
 
 ## Quick start
 
