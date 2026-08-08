@@ -23,6 +23,9 @@ fields). This tool deliberately does **not** rebuild any of that. It:
 4. publishes the derived view only after every required source and staged output
    validates; a failed replacement leaves the prior complete `_Steuer` current.
 
+This is a readable escape copy, not a replacement for tested backups of
+Paperless and its database.
+
 ```
 export/
   Bescheid/Finanzamt/2024-05-01 Steuerbescheid.pdf   # ← document_exporter
@@ -32,22 +35,6 @@ export/
     INDEX.csv                                         # year,title,correspondent,created,original_path
 ```
 
-## Status
-
-Released **1.2.0** — verified on PyPI, as a GitHub Release, and through
-`fileworks/tap` on 2026-08-01. Development after that tag is unreleased
-until the release workflow runs.
-
-## Overview
-
-`paperless-export` wraps Paperless-ngx's own `document_exporter` and adds what
-it leaves out: a scheduled, verified run, streamed progress instead of silence,
-and an optional tax view (`_Steuer`) built from your existing tags.
-
-It is an escape hatch, not a backup — it produces a readable copy of what
-Paperless holds, so that Paperless never becomes the only place your documents
-exist.
-
 ## Install
 
 ```sh
@@ -56,11 +43,20 @@ pipx install paperless-export          # + 'paperless-export[pdf]' for --embed-t
 brew install fileworks/tap/paperless-export
 ```
 
-Version `1.2.0` is published on
-[PyPI](https://pypi.org/project/paperless-export/1.2.0/), as a
-[GitHub Release](https://github.com/fileworks/paperless-export/releases/tag/v1.2.0),
-and through `fileworks/tap`. Development after that tag remains unreleased
-until the normal release workflow runs.
+Released **1.2.2** on
+[PyPI](https://pypi.org/project/paperless-export/1.2.2/),
+[GitHub](https://github.com/fileworks/paperless-export/releases/tag/v1.2.2), and
+`fileworks/tap` (verified 2026-08-04).
+
+## Quick start
+
+```sh
+# from the directory holding your Paperless compose file
+paperless-export run --export-dir ~/paperless-export
+```
+
+The first run performs a full export. Later runs reuse what is already there and
+rebuild only what changed.
 
 ## Usage
 
@@ -110,16 +106,6 @@ Notes:
   so Paperless can re-export those files on the next
   `--compare-checksums` run.
 
-## Quick start
-
-```sh
-# from the directory holding your Paperless compose file
-paperless-export run --export-dir ~/paperless-export
-```
-
-The first run performs a full export. Later runs reuse what is already there and
-rebuild only what changed.
-
 ## Passphrase and export security
 
 Without a passphrase, the command warns before launching Paperless because
@@ -162,15 +148,26 @@ post-processing.
 
 ## Exit codes
 
-| Code | Meaning |
-|---|---|
-| 0 | complete requested output, including successful advisory fallbacks |
-| 1 | unexpected wrapper failure |
-| 2 | bad configuration / authentication failure |
-| 3 | Paperless API or Docker/Compose/service/container unavailable |
-| 4 | malformed, unsafe, missing, or fatally unwritable export output |
-| 5 | exporter succeeded but requested post-processing is incomplete |
-| 6 | `document_exporter` ran but failed (its child code remains in diagnostics) |
+`immich-export`, `paperless-export` and `unpacksort` share one exit-code
+vocabulary, so a script can branch on the code without knowing which tool it
+ran. The class of outcome is the same everywhere; the specific condition is
+this tool's, and the table below is what it means here.
+
+| Code | Name | Meaning |
+|---|---|---|
+| 0 | `SUCCESS` | everything asked for was done |
+| 1 | `PARTIAL` | the exporter succeeded but requested post-processing is incomplete |
+| 2 | `USAGE` | bad flags, a path that is missing or malformed, or credentials the server rejected — nothing was attempted |
+| 3 | `CONFLICT` | the Paperless API, or its Docker/Compose service or container, is unavailable |
+| 4 | `FATAL` | unexpected failure, or a write that failed after work had begun (re-run with `--verbose`) |
+| 130 | `INTERRUPTED` | cancelled by the operator |
+
+The line between `2` and `4` is **was anything attempted**. A `--export-dir` that
+is missing when you type the command is `2` in every tool: nothing ran, and
+nothing was written. A write that fails part-way through leaves the export in a
+state nobody can characterise, and that is `4`.
+
+`document_exporter`'s own child code stays in the diagnostics line.
 
 ## Scheduling on a Synology (DSM Task Scheduler)
 
@@ -212,11 +209,19 @@ runs.
 heartbeat reaches both the terminal and rotating logfile during silent work.
 The configured exporter timeout stops a genuinely stuck child.
 
-**Exit code 4, 5, or 6.** Four means exported output is missing, unsafe, or
-cannot be published; five means non-fatal requested post-processing (currently
-PDF metadata embedding) is incomplete; six means `document_exporter` itself
-failed. All three leave Paperless originals untouched, and tax-view publication
-failures retain the previous complete `_Steuer`.
+**Exit code 2 for a directory you expected to work.** `tax-view` rebuilds the
+views of an export it did not produce, so `--export-dir` has to exist already;
+run `paperless-export run` first. `run` will create the directory itself, but
+only its last segment, and only when the parent is already there — so a mistyped
+path fails loudly instead of quietly becoming a new empty tree.
+
+**Exit code 1 or 4.** One means `document_exporter` succeeded but requested
+post-processing (PDF metadata embedding, the `_Steuer` view) is incomplete; the
+report names each part that is missing. Four means an unexpected failure, or
+output that could not be written once the run was under way — including a
+manifest path pointing outside the export root. Both leave Paperless originals
+untouched, and a failed tax-view publication retains the previous complete
+`_Steuer`.
 
 **Symlinks fail on the target.** Use `--copy`; the tax view is then built
 from copies.
@@ -224,12 +229,11 @@ from copies.
 ## Development
 
 ```sh
-uv lock --check
-uv sync --locked --all-extras --dev
+uv sync --locked --all-extras --all-groups
 uv run ruff check . && uv run ruff format --check .   # lint
 uv run mypy                                           # strict types
 uv run pytest                                         # tests
-uv build
+uv build                                              # sdist + wheel
 ```
 
 Conventional Commits drive releases (`python-semantic-release`): merge to
@@ -244,6 +248,14 @@ history and policy enforcement.
 For per-clone paths, commands, or preferences, create an ignored
 `CLAUDE.local.md` at the repository root. Do not put credentials or other
 secrets in it.
+
+## Security
+
+Report vulnerabilities privately as described in [SECURITY.md](SECURITY.md).
+Registered secrets — the Paperless token and the passphrase — are redacted from
+the logfile and from captured exporter output, including values split across
+chunk boundaries. A passphrase is accepted only from a protected file or
+standard input, never from `argv` or the environment.
 
 ## License
 

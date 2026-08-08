@@ -88,7 +88,7 @@ def embed_metadata(
                 result.embedded += 1
             except UnsafeOutputError:
                 raise
-            except Exception as exc:  # one broken PDF must not stop other safe work
+            except Exception as exc:  # noqa: BLE001 - one broken PDF must not stop other safe work
                 logger.warning(
                     "Could not embed metadata into %s: %s",
                     target.display,
