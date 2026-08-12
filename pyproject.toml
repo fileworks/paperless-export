@@ -1,6 +1,6 @@
 [project]
 name = "paperless-export"
-version = "1.2.2"
+version = "2.0.0"
 description = "Scheduled wrapper around Paperless-ngx's document_exporter plus a _Steuer/YYYY tax-view post-processor."
 readme = "README.md"
 license = "MIT"
