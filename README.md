@@ -39,7 +39,7 @@ export/
 
 ## Status
 
-The latest verified public release is 1.2.2 across GitHub Releases, PyPI, and
+The latest verified public release is 2.0.0 across GitHub Releases, PyPI, and
 the Fileworks Homebrew tap.
 
 ## Install
@@ -50,9 +50,9 @@ pipx install paperless-export          # + 'paperless-export[pdf]' for --embed-t
 brew install fileworks/tap/paperless-export
 ```
 
-Released **1.2.2** on
-[PyPI](https://pypi.org/project/paperless-export/1.2.2/),
-[GitHub](https://github.com/fileworks/paperless-export/releases/tag/v1.2.2), and
+Released **2.0.0** on
+[PyPI](https://pypi.org/project/paperless-export/2.0.0/),
+[GitHub](https://github.com/fileworks/paperless-export/releases/tag/v2.0.0), and
 `fileworks/tap` (verified 2026-08-12).
 
 ## Quick start
