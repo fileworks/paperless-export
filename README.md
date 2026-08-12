@@ -2,6 +2,8 @@
 
 # paperless-export
 
+## Overview
+
 A thin scheduled wrapper around [Paperless-ngx](https://docs.paperless-ngx.com)'s
 built-in `document_exporter`, plus the one thing it doesn't do: a materialized
 **`_Steuer/YYYY/` tax view** built from your `Steuer-YYYY` tags.
@@ -35,6 +37,11 @@ export/
     INDEX.csv                                         # year,title,correspondent,created,original_path
 ```
 
+## Status
+
+The latest verified public release is 1.2.2 across GitHub Releases, PyPI, and
+the Fileworks Homebrew tap.
+
 ## Install
 
 ```sh
@@ -46,7 +53,7 @@ brew install fileworks/tap/paperless-export
 Released **1.2.2** on
 [PyPI](https://pypi.org/project/paperless-export/1.2.2/),
 [GitHub](https://github.com/fileworks/paperless-export/releases/tag/v1.2.2), and
-`fileworks/tap` (verified 2026-08-04).
+`fileworks/tap` (verified 2026-08-12).
 
 ## Quick start
 
