@@ -45,7 +45,7 @@ dev = [
   "pikepdf==10.10.0",
   "pytest==9.1.1",
   "respx==0.23.1",
-  "ruff==0.16.0",
+  "ruff==0.16.1",
 ]
 
 [build-system]

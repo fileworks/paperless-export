@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import tarfile
+import tomllib
 import zipfile
 from pathlib import Path
 
@@ -80,6 +81,24 @@ def test_lock_guard_allows_only_root_version_change() -> None:
     assert _lock_without_project_version(before) != _lock_without_project_version(
         _lock("0.1.1", dependency_version="2.0.0")
     )
+
+
+def test_locked_dev_tools_match_their_exact_project_pins() -> None:
+    project = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
+    lock = tomllib.loads(Path("uv.lock").read_text(encoding="utf-8"))
+    declared = {
+        name: version
+        for requirement in project["dependency-groups"]["dev"]
+        for name, version in [requirement.split("==", maxsplit=1)]
+    }
+    packages = {package["name"]: package for package in lock["package"]}
+    locked_requirements = {
+        requirement["name"]: requirement["specifier"].removeprefix("==")
+        for requirement in packages["paperless-export"]["metadata"]["requires-dev"]["dev"]
+    }
+
+    assert locked_requirements == declared
+    assert {name: packages[name]["version"] for name in declared} == declared
 
 
 def test_artifacts_require_exactly_one_consistent_wheel_and_sdist(
