@@ -416,7 +416,7 @@ dev = [
     { name = "pikepdf", specifier = "==10.10.0" },
     { name = "pytest", specifier = "==9.1.1" },
     { name = "respx", specifier = "==0.23.1" },
-    { name = "ruff", specifier = "==0.16.0" },
+    { name = "ruff", specifier = "==0.16.1" },
 ]
 
 [[package]]
