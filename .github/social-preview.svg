@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="640" viewBox="0 0 1280 640" role="img" aria-labelledby="title description">
+  <title id="title">paperless-export · Fileworks</title>
+  <desc id="description">Run reliable Paperless exports and build yearly tax views.</desc>
+  <rect width="1280" height="640" fill="#FAF7F2"/>
+  <rect x="72" y="72" width="1136" height="496" rx="32" fill="#FFFFFF" stroke="#E6E3E0" stroke-width="2"/>
+  <svg x="112" y="108" width="128" height="128" viewBox="0 0 32 32" aria-hidden="true">
+    <g fill="none" stroke="#2A251F" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M6.2 6.6h9.2l4.4 4.4v14.4H6.2z"/><path d="M15.4 6.6v4.4h4.4M9.2 15.4h7.2M9.2 19.4h5"/><path stroke="#E8582A" d="M23.2 16h4.6m-2.2-2.2 2.2 2.2-2.2 2.2"/></g>
+  </svg>
+  <text x="274" y="159" fill="#C2410C" font-family="Geist Sans,system-ui,sans-serif" font-size="24" font-weight="700" letter-spacing="2">FILEWORKS</text>
+  <text x="274" y="220" fill="#14110F" font-family="Geist Sans,system-ui,sans-serif" font-size="52" font-weight="650">paperless-export</text>
+  <text x="112" y="354" fill="#221E1C" font-family="Geist Sans,system-ui,sans-serif" font-size="31" font-weight="500">Run reliable Paperless exports and build yearly tax views.</text>
+  <path d="M112 410H1168" stroke="#E6E3E0" stroke-width="2"/>
+  <g>
+    <text x="112" y="461" fill="#C2410C" font-family="Geist Sans,system-ui,sans-serif" font-size="14" font-weight="700" letter-spacing="1.8">TYPE</text>
+    <text x="112" y="500" fill="#655D58" font-family="Geist Sans,system-ui,sans-serif" font-size="22" font-weight="500">Command-line tool</text>
+    <text x="456" y="461" fill="#C2410C" font-family="Geist Sans,system-ui,sans-serif" font-size="14" font-weight="700" letter-spacing="1.8">INSTALL</text>
+    <text x="456" y="500" fill="#655D58" font-family="Geist Mono,ui-monospace,monospace" font-size="22" font-weight="500">pipx · Homebrew</text>
+    <text x="800" y="461" fill="#C2410C" font-family="Geist Sans,system-ui,sans-serif" font-size="14" font-weight="700" letter-spacing="1.8">OUTPUT</text>
+    <text x="800" y="500" fill="#655D58" font-family="Geist Sans,system-ui,sans-serif" font-size="22" font-weight="500">Export + tax view</text>
+  </g>
+</svg>
