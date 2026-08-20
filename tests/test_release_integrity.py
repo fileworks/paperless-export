@@ -173,9 +173,7 @@ def test_locked_ci_and_existing_reviewed_actions_are_preserved() -> None:
     assert "uv lock --check" in ci
     assert "uv sync --locked --all-extras --dev" in ci
     assert "actions/checkout@v7" in ci + release
-    assert re.search(
-        r"python-semantic-release/python-semantic-release@[0-9a-f]{40}", release
-    )
+    assert re.search(r"python-semantic-release/python-semantic-release@[0-9a-f]{40}", release)
     assert "no_operation_mode: true" in release
     assert "root_options:" not in release
     assert "GH_REPO: ${{ github.repository }}" in release
