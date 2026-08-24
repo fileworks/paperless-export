@@ -4,6 +4,14 @@ on:
   schedule:
     - cron: "43 3 * * 0"
 
+# Least privilege, stated here rather than inherited. The repository default is
+# already read-only and `maintenance` enforces that setting, but a workflow that
+# depends on a repository setting for its privilege is one settings change away
+# from running with a write token. Nothing here writes: no release, no push, no
+# attestation, no `gh` call.
+permissions:
+  contents: read
+
 concurrency:
   group: scale-${{ github.ref }}
   cancel-in-progress: true
