@@ -166,7 +166,11 @@ ignore = [
 [tool.mypy]
 python_version = "3.12"
 strict = true
-files = ["src", "tests"]
+# Same scope as immich-export and unpacksort: the tests and the release scripts
+# are checked too, not just the package. CI passes an explicit `.` target, so
+# `scripts/` was already gated there — leaving it out here made the local gate
+# quietly weaker than the one that decides whether a branch merges.
+files = ["src", "tests", "scripts"]
 
 [[tool.mypy.overrides]]
 module = "pikepdf.*"
