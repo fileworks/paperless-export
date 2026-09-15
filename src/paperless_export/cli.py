@@ -50,7 +50,15 @@ def _guarded[T](
 ) -> T:
     for secret in secrets:
         register_secret(secret)
-    configure_logging(log_file, verbose=verbose)
+    try:
+        configure_logging(log_file, verbose=verbose)
+    except Exception as exc:
+        safe_error = sanitize_text(
+            f"Could not start logging at {log_file}: {exc}. "
+            "Choose a writable logfile with --log-file or fix the path permissions."
+        )
+        typer.secho(safe_error, fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=ExitCode.FATAL) from exc
     logging.getLogger(__name__).info("paperless-export started; logfile=%s", log_file)
     try:
         result = action()

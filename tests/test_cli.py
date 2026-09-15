@@ -104,6 +104,31 @@ def test_logfile_environment_alias_is_executed(tmp_path: Path) -> None:
     assert "No manifest" in logfile.read_text()
 
 
+def test_unusable_logfile_exits_fatal_without_traceback(tmp_path: Path) -> None:
+    secret = "logfile-startup-secret"
+    logfile = tmp_path / secret
+    logfile.mkdir()
+
+    result = runner.invoke(
+        app,
+        [
+            "run",
+            "--export-dir",
+            str(tmp_path),
+            "--log-file",
+            str(logfile),
+            "--token",
+            secret,
+        ],
+    )
+
+    assert result.exit_code == ExitCode.FATAL
+    assert "Could not start logging" in result.output
+    assert "--log-file" in result.output
+    assert secret not in result.output
+    assert "Traceback" not in result.output
+
+
 def test_run_end_to_end_with_fake_exporter(export_dir: Path, fake_exporter: Path) -> None:
     missing = export_dir / "Sonstiges/2025-02-02 Verschollen.pdf"
     missing.parent.mkdir(parents=True, exist_ok=True)
