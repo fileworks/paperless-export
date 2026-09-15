@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import json
+import subprocess
 import sys
+import time
 from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -11,6 +14,7 @@ from paperless_export.exit_codes import ExitCode
 from paperless_export.exporter import (
     DIAGNOSTIC_TAIL_BYTES,
     _Completed,
+    _stop_child,
     build_command,
     run_exporter,
 )
@@ -146,6 +150,64 @@ class TestRunExporter:
 
         with pytest.raises(ExporterFailedError, match=r"configured 0\.1s timeout"):
             run_exporter(_cmd(script), "/export", timeout_seconds=0.1)
+
+    def test_stdout_eof_does_not_bypass_timeout_and_child_is_cleaned_up(
+        self, tmp_path: Path
+    ) -> None:
+        pid_file = tmp_path / "child.pid"
+        finished_file = tmp_path / "child.finished"
+        script = tmp_path / "closes_output.py"
+        script.write_text(
+            "import os, pathlib, sys, time\n"
+            f"pid_file = pathlib.Path({json.dumps(str(pid_file))})\n"
+            f"finished_file = pathlib.Path({json.dumps(str(finished_file))})\n"
+            "pid_file.write_text(str(os.getpid()))\n"
+            "sys.stdout.close()\n"
+            "sys.stderr.close()\n"
+            "time.sleep(1.5)\n"
+            "finished_file.write_text('finished')\n",
+            encoding="utf-8",
+        )
+
+        started = time.monotonic()
+        with pytest.raises(ExporterFailedError, match=r"configured 0\.1s timeout"):
+            run_exporter(_cmd(script), "/export", timeout_seconds=0.1)
+
+        assert time.monotonic() - started < 1.0
+        assert pid_file.is_file()
+        assert not finished_file.exists()
+
+
+class _UncooperativeProcess:
+    def __init__(self) -> None:
+        self.wait_timeouts: list[float | None] = []
+        self.terminated = False
+        self.killed = False
+
+    def poll(self) -> None:
+        return None
+
+    def terminate(self) -> None:
+        self.terminated = True
+
+    def kill(self) -> None:
+        self.killed = True
+
+    def wait(self, *, timeout: float | None = None) -> None:
+        self.wait_timeouts.append(timeout)
+        assert timeout is not None
+        raise subprocess.TimeoutExpired("test-child", timeout)
+
+
+def test_child_cleanup_uses_the_shared_deadline(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("paperless_export.exporter.time.monotonic", lambda: 99.5)
+    process = _UncooperativeProcess()
+
+    _stop_child(cast(subprocess.Popen[bytes], process), deadline=100.0)
+
+    assert process.terminated
+    assert process.killed
+    assert process.wait_timeouts == [0.5, 0.5]
 
 
 class TestLiveOutput:

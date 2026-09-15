@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import codecs
+import contextlib
 import logging
 import os
 import queue
@@ -176,6 +177,12 @@ def _bounded_tail(tail: bytearray, chunk: bytes) -> None:
         del tail[: len(tail) - DIAGNOSTIC_TAIL_BYTES]
 
 
+def _remaining(deadline: float | None) -> float | None:
+    if deadline is None:
+        return None
+    return max(0.0, deadline - time.monotonic())
+
+
 def _run(
     command: list[str],
     *,
@@ -231,21 +238,25 @@ def _run(
     reader = threading.Thread(target=read_output, name="paperless-export-output", daemon=True)
     reader.start()
     started = time.monotonic()
+    deadline = started + timeout_seconds if timeout_seconds > 0 else None
     last_heartbeat = started
     output_bytes = 0
     finished = False
     try:
         while not finished:
-            now = time.monotonic()
-            if timeout_seconds > 0 and now - started >= timeout_seconds:
-                _stop_child(process)
+            remaining = _remaining(deadline)
+            if remaining is not None and remaining <= 0:
+                _stop_child(process, deadline=deadline)
                 raise ExporterFailedError(
                     f"document_exporter exceeded the configured {timeout_seconds:g}s timeout; "
                     "the child was terminated and committed Paperless output was left intact.",
                     124,
                 )
             try:
-                chunk = chunks.get(timeout=min(0.25, max(0.01, HEARTBEAT_SECONDS)))
+                wait_timeout = min(0.25, max(0.01, HEARTBEAT_SECONDS))
+                if remaining is not None:
+                    wait_timeout = min(wait_timeout, remaining)
+                chunk = chunks.get(timeout=wait_timeout)
             except queue.Empty:
                 chunk = b""
             if chunk is None:
@@ -286,10 +297,12 @@ def _run(
                 last_heartbeat = now
     except BaseException:
         if process.poll() is None:
-            _stop_child(process)
+            _stop_child(process, deadline=deadline)
         raise
     finally:
-        reader.join(timeout=1.0)
+        reader_timeout = _remaining(deadline)
+        reader_timeout = 1.0 if reader_timeout is None else min(reader_timeout, 1.0)
+        reader.join(timeout=reader_timeout)
         process.stdout.close()
 
     final_chunk = redactor.feed(b"", final=True)
@@ -306,22 +319,41 @@ def _run(
             sys.stderr.write(sanitize_text(remainder))
         sys.stderr.flush()
 
+    try:
+        returncode = process.wait(timeout=_remaining(deadline))
+    except subprocess.TimeoutExpired:
+        _stop_child(process, deadline=deadline)
+        raise ExporterFailedError(
+            f"document_exporter exceeded the configured {timeout_seconds:g}s timeout; "
+            "the child was terminated and committed Paperless output was left intact.",
+            124,
+        ) from None
+
     return _Completed(
-        returncode=process.wait(),
+        returncode=returncode,
         output=bytes(tail).decode("utf-8", errors="replace"),
         path_too_long=signals.path_too_long,
         docker_unavailable=signals.docker_unavailable,
     )
 
 
-def _stop_child(process: subprocess.Popen[bytes]) -> None:
+def _stop_child(process: subprocess.Popen[bytes], *, deadline: float | None) -> None:
     """Terminate a child, escalating to kill only when it does not exit."""
-    process.terminate()
+    if process.poll() is not None:
+        return
+    with contextlib.suppress(ProcessLookupError):
+        process.terminate()
+    wait_timeout = _remaining(deadline)
+    wait_timeout = 5.0 if wait_timeout is None else min(wait_timeout, 5.0)
     try:
-        process.wait(timeout=5)
+        process.wait(timeout=wait_timeout)
     except subprocess.TimeoutExpired:
-        process.kill()
-        process.wait(timeout=5)
+        with contextlib.suppress(ProcessLookupError):
+            process.kill()
+        wait_timeout = _remaining(deadline)
+        wait_timeout = 5.0 if wait_timeout is None else min(wait_timeout, 5.0)
+        with contextlib.suppress(subprocess.TimeoutExpired):
+            process.wait(timeout=wait_timeout)
 
 
 def _failure(command: list[str], completed: _Completed, *, flat: bool = False) -> NoReturn:
