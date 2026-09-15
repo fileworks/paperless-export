@@ -49,7 +49,9 @@ dev = [
 ]
 
 [build-system]
-requires = ["hatchling"]
+# Build isolation is outside uv.lock; keep its direct and transitive inputs
+# explicit in the checked-in constraints files.
+requires = ["hatchling==1.31.0"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
@@ -183,7 +185,7 @@ testpaths = ["tests"]
 version_toml = ["pyproject.toml:project.version"]
 version_variables = ["src/paperless_export/__init__.py:__version__"]
 commit_message = "chore(release): {version} [skip ci]"
-build_command = "python -m ensurepip --upgrade && python -m pip install uv && python scripts/release_integrity.py prepare && uv build"
+build_command = "python -m ensurepip --upgrade && python -m pip install uv==0.11.18 && python scripts/release_integrity.py prepare && uv build --build-constraints build-constraints.txt"
 allow_zero_version = true
 
 [tool.semantic_release.branches.main]
