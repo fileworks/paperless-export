@@ -5,7 +5,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 import pytest
 
@@ -152,8 +152,17 @@ class TestRunExporter:
             run_exporter(_cmd(script), "/export", timeout_seconds=0.1)
 
     def test_stdout_eof_does_not_bypass_timeout_and_child_is_cleaned_up(
-        self, tmp_path: Path
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        children: list[subprocess.Popen[str]] = []
+        real_popen = subprocess.Popen
+
+        def observe_child(*args: Any, **kwargs: Any) -> subprocess.Popen[str]:
+            child = real_popen(*args, **kwargs)
+            children.append(child)
+            return child
+
+        monkeypatch.setattr(subprocess, "Popen", observe_child)
         pid_file = tmp_path / "child.pid"
         finished_file = tmp_path / "child.finished"
         script = tmp_path / "closes_output.py"
@@ -162,20 +171,22 @@ class TestRunExporter:
             f"pid_file = pathlib.Path({json.dumps(str(pid_file))})\n"
             f"finished_file = pathlib.Path({json.dumps(str(finished_file))})\n"
             "pid_file.write_text(str(os.getpid()))\n"
-            "sys.stdout.close()\n"
-            "sys.stderr.close()\n"
-            "time.sleep(1.5)\n"
+            "os.close(1)\n"
+            "os.close(2)\n"
+            "time.sleep(3)\n"
             "finished_file.write_text('finished')\n",
             encoding="utf-8",
         )
 
         started = time.monotonic()
-        with pytest.raises(ExporterFailedError, match=r"configured 0\.1s timeout"):
-            run_exporter(_cmd(script), "/export", timeout_seconds=0.1)
+        with pytest.raises(ExporterFailedError, match=r"configured 1s timeout"):
+            run_exporter(_cmd(script), "/export", timeout_seconds=1.0)
 
-        assert time.monotonic() - started < 1.0
+        assert time.monotonic() - started < 2.5
         assert pid_file.is_file()
         assert not finished_file.exists()
+        assert len(children) == 1
+        assert children[0].poll() is not None
 
 
 class _UncooperativeProcess:
