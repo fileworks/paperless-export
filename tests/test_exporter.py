@@ -5,7 +5,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 import pytest
 
@@ -152,8 +152,25 @@ class TestRunExporter:
             run_exporter(_cmd(script), "/export", timeout_seconds=0.1)
 
     def test_stdout_eof_does_not_bypass_timeout_and_child_is_cleaned_up(
-        self, tmp_path: Path
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        children: list[subprocess.Popen[str]] = []
+        waits: list[float | None] = []
+        real_popen = subprocess.Popen
+
+        def observe_child(*args: Any, **kwargs: Any) -> subprocess.Popen[str]:
+            child = real_popen(*args, **kwargs)
+            children.append(child)
+            real_wait = child.wait
+
+            def observed_wait(timeout: float | None = None) -> int:
+                waits.append(timeout)
+                return real_wait(timeout=timeout)
+
+            monkeypatch.setattr(child, "wait", observed_wait)
+            return child
+
+        monkeypatch.setattr(subprocess, "Popen", observe_child)
         pid_file = tmp_path / "child.pid"
         finished_file = tmp_path / "child.finished"
         script = tmp_path / "closes_output.py"
@@ -162,20 +179,28 @@ class TestRunExporter:
             f"pid_file = pathlib.Path({json.dumps(str(pid_file))})\n"
             f"finished_file = pathlib.Path({json.dumps(str(finished_file))})\n"
             "pid_file.write_text(str(os.getpid()))\n"
-            "sys.stdout.close()\n"
-            "sys.stderr.close()\n"
-            "time.sleep(1.5)\n"
+            "os.close(1)\n"
+            "os.close(2)\n"
+            "time.sleep(3)\n"
             "finished_file.write_text('finished')\n",
             encoding="utf-8",
         )
 
         started = time.monotonic()
-        with pytest.raises(ExporterFailedError, match=r"configured 0\.1s timeout"):
-            run_exporter(_cmd(script), "/export", timeout_seconds=0.1)
+        # Windows venv python.exe is a redirector that retains inherited pipe
+        # handles. Launch the interpreter itself so descriptor closure is EOF.
+        interpreter = getattr(sys, "_base_executable", sys.executable)
+        with pytest.raises(ExporterFailedError, match=r"configured 1s timeout"):
+            run_exporter(f'"{interpreter}" "{script}"', "/export", timeout_seconds=1.0)
 
-        assert time.monotonic() - started < 1.0
+        assert time.monotonic() - started < 2.5
         assert pid_file.is_file()
         assert not finished_file.exists()
+        assert len(children) == 1
+        assert children[0].poll() is not None
+        # EOF must reach wait while time remains, not merely trigger the
+        # independent timeout in the pipe-draining loop.
+        assert waits and waits[0] is not None and 0 < waits[0] <= 1.0
 
 
 class _UncooperativeProcess:
@@ -199,15 +224,16 @@ class _UncooperativeProcess:
         raise subprocess.TimeoutExpired("test-child", timeout)
 
 
-def test_child_cleanup_uses_the_shared_deadline(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_child_cleanup_bounds_termination_and_reaping(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("paperless_export.exporter.time.monotonic", lambda: 99.5)
     process = _UncooperativeProcess()
 
-    _stop_child(cast(subprocess.Popen[bytes], process), deadline=100.0)
+    with pytest.raises(ExporterFailedError, match="1s cleanup grace"):
+        _stop_child(cast(subprocess.Popen[bytes], process), deadline=100.0)
 
     assert process.terminated
     assert process.killed
-    assert process.wait_timeouts == [0.5, 0.5]
+    assert process.wait_timeouts == [0.5, 1.0]
 
 
 class TestLiveOutput:

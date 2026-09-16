@@ -102,7 +102,9 @@ Notes:
   export directory for unattended-job diagnostics.
 - `PAPERLESS_EXPORT_TIMEOUT_SECONDS` is the environment alias for
   `--exporter-timeout`. The reviewed default is six hours; expiry terminates the
-  child cleanly, then force-kills only if it will not exit.
+  child, then force-kills only if it will not exit. After a forced kill, cleanup
+  allows at most one additional second to confirm the process has exited;
+  failure to confirm is reported explicitly.
 - Passphrase transport is supported for the default
   `docker compose exec -T webserver document_exporter` adapter. A custom
   exporter command is rejected when a passphrase is configured unless this
