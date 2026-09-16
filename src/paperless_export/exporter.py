@@ -350,10 +350,16 @@ def _stop_child(process: subprocess.Popen[bytes], *, deadline: float | None) -> 
     except subprocess.TimeoutExpired:
         with contextlib.suppress(ProcessLookupError):
             process.kill()
-        wait_timeout = _remaining(deadline)
-        wait_timeout = 5.0 if wait_timeout is None else min(wait_timeout, 5.0)
-        with contextlib.suppress(subprocess.TimeoutExpired):
-            process.wait(timeout=wait_timeout)
+        # An exhausted operation deadline leaves no scheduling time to reap a
+        # killed child. Give the OS one bounded second to report its exit;
+        # otherwise report that cleanup could not be confirmed, never success.
+        try:
+            process.wait(timeout=1.0)
+        except subprocess.TimeoutExpired:
+            raise ExporterFailedError(
+                "document_exporter did not confirm exit within the 1s cleanup grace period.",
+                124,
+            ) from None
 
 
 def _failure(command: list[str], completed: _Completed, *, flat: bool = False) -> NoReturn:
